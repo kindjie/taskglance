@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -10,14 +11,45 @@
 #include <locale>
 #include <sstream>
 #include <stdexcept>
+
+#ifdef _WIN32
+#include <io.h>
+#include <process.h>
+#else
 #include <sys/ioctl.h>
 #include <unistd.h>
+#endif
 
 namespace taskglance {
 namespace {
 
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
+
+int stdout_fd() {
+#ifdef _WIN32
+  return _fileno(stdout);
+#else
+  return STDOUT_FILENO;
+#endif
+}
+
+int process_id() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return getpid();
+#endif
+}
+
+int char_display_width(wchar_t wide) {
+#ifdef _WIN32
+  return wide == 0 ? 0 : 1;
+#else
+  int width = ::wcwidth(wide);
+  return width > 0 ? width : 0;
+#endif
+}
 
 }  // namespace
 
@@ -75,15 +107,22 @@ bool is_truthy_env(const char* name) {
 }
 
 bool stdout_is_tty() {
-  return ::isatty(STDOUT_FILENO) == 1;
+  int fd = stdout_fd();
+#ifdef _WIN32
+  return fd >= 0 && _isatty(fd) == 1;
+#else
+  return fd >= 0 && ::isatty(fd) == 1;
+#endif
 }
 
 int terminal_columns() {
+#ifndef _WIN32
   struct winsize size {};
   if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 &&
       size.ws_col > 0) {
     return static_cast<int>(size.ws_col);
   }
+#endif
 
   const char* columns = std::getenv("COLUMNS");
   if (columns != nullptr) {
@@ -128,7 +167,7 @@ void atomic_write_file(const std::filesystem::path& file,
                        const std::string& content) {
   ensure_parent_dir(file);
   auto temp = file;
-  temp += ".tmp." + std::to_string(::getpid());
+  temp += ".tmp." + std::to_string(process_id());
   {
     std::ofstream out(temp, std::ios::binary);
     if (!out) {
@@ -184,8 +223,7 @@ int display_width(const std::string& value) {
     if (consumed == 0) {
       break;
     }
-    int char_width = ::wcwidth(wide);
-    width += char_width > 0 ? char_width : 0;
+    width += char_display_width(wide);
     cursor += consumed;
     remaining -= consumed;
   }
@@ -221,10 +259,7 @@ std::string truncate_display(const std::string& value, int width) {
     } else if (consumed == 0) {
       break;
     }
-    int char_width = ::wcwidth(wide);
-    if (char_width < 0) {
-      char_width = 0;
-    }
+    int char_width = char_display_width(wide);
     if (used + char_width > limit) {
       break;
     }

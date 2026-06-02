@@ -5,7 +5,12 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "taskglance/config.hpp"
 #include "taskglance/legacy.hpp"
@@ -17,9 +22,17 @@
 namespace fs = std::filesystem;
 using namespace taskglance;
 
+static int process_id() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return getpid();
+#endif
+}
+
 static fs::path temp_root() {
   auto root = fs::temp_directory_path() /
-              ("taskglance-tests-" + std::to_string(::getpid()));
+              ("taskglance-tests-" + std::to_string(process_id()));
   fs::remove_all(root);
   fs::create_directories(root);
   return root;
