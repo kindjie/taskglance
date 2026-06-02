@@ -1,5 +1,7 @@
 # taskglance
 
+[![Build](https://github.com/kindjie/taskglance/actions/workflows/build.yml/badge.svg)](https://github.com/kindjie/taskglance/actions/workflows/build.yml)
+
 `taskglance` is a small terminal task reminder CLI written in C++.
 
 It keeps short-lived tasks visible without printing a large reminder before
