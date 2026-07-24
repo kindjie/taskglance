@@ -13,6 +13,11 @@ public-repo hygiene.
 - Build system: CMake, documented at https://cmake.org/documentation/
 - Language: C++20, compiled locally with Apple Clang during initial setup.
 - Tests: CTest, via `ctest --test-dir build`.
+- CI: GitHub Actions, documented at https://docs.github.com/actions
+- Action dependency updates: Dependabot, documented at
+  https://docs.github.com/code-security/dependabot/dependabot-version-updates
+- Repository checkout action: `actions/checkout` v7.0.1, documented at
+  https://github.com/actions/checkout/tree/v7.0.1
 
 ## Commands
 

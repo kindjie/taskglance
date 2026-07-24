@@ -1,12 +1,20 @@
 # taskglance
 
-[![Build](https://github.com/kindjie/taskglance/actions/workflows/build.yml/badge.svg)](https://github.com/kindjie/taskglance/actions/workflows/build.yml)
+[![Build][build-badge]][build-workflow]
 
 `taskglance` is a small terminal task reminder CLI written in C++.
 
 It keeps short-lived tasks visible without printing a large reminder before
 every prompt. The canonical command is `taskglance`; shell hooks can optionally
 install a short alias, but `tg` commonly collides with TopGit.
+
+## Requirements
+
+- CMake 3.24 or newer
+- A C++20 compiler
+- Linux, macOS, or Windows
+
+Prompt hooks and completions are available for zsh, bash, and fish.
 
 ## Build
 
@@ -124,3 +132,8 @@ Inspired by `kindjie/zsh-todo-reminder`, itself forked from
 ## License
 
 MIT. See `LICENSE`.
+
+[build-badge]:
+  https://github.com/kindjie/taskglance/actions/workflows/build.yml/badge.svg
+[build-workflow]:
+  https://github.com/kindjie/taskglance/actions/workflows/build.yml
