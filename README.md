@@ -87,6 +87,13 @@ taskglance prompt
 taskglance prompt --force
 ```
 
+Prompt rendering can be turned off globally and back on again:
+
+```sh
+taskglance disable
+taskglance enable
+```
+
 Prompt hooks:
 
 ```sh
@@ -104,6 +111,14 @@ summarized so box rendering stays small enough for repeated prompts.
 `prompt_mode=transient` is an opt-in zsh-first integration target. The
 transient hook wraps zsh `accept-line`, so install it only when that tradeoff is
 acceptable.
+
+`prompt_enabled=false` suppresses prompt rendering everywhere, including
+`taskglance prompt --force`, so installed shell hooks stay silent without being
+uninstalled. `taskglance disable` and `taskglance enable` are shortcuts for
+`taskglance config set prompt_enabled false|true`. This differs from
+`prompt_mode=manual`, which only stops automatic rendering and still honors
+`taskglance prompt --force`. Other commands, such as `taskglance list`, are
+unaffected.
 
 ## Data
 

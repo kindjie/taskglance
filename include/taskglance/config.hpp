@@ -23,6 +23,7 @@ struct Config {
   int prompt_interval_seconds = 900;
   int max_prompt_tasks = 2;
   int max_prompt_width = 0;
+  bool prompt_enabled = true;
   bool color = false;
   bool alias_tg = false;
 };

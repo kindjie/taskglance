@@ -199,7 +199,7 @@ std::string align_rendered(const std::string& rendered, const Config& config,
 
 std::string render_tasks(const std::vector<Task>& tasks, const Config& config,
                          int terminal_width, bool tty) {
-  if (!tty) {
+  if (!config.prompt_enabled || !tty) {
     return "";
   }
   if (tasks.empty() || active_tasks(tasks).empty()) {

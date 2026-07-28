@@ -175,6 +175,17 @@ static void test_render_left_alignment_can_be_configured() {
   assert(output.rfind("tasks: ", 0) == 0);
 }
 
+static void test_render_disabled_returns_nothing() {
+  Config config;
+  config.prompt_enabled = false;
+  std::vector<Task> tasks;
+  tasks.push_back(make_task("One", tasks));
+
+  assert(render_tasks(tasks, config, 80, true).empty());
+  config.prompt_enabled = true;
+  assert(!render_tasks(tasks, config, 80, true).empty());
+}
+
 static void test_prompt_state_change_detection() {
   auto root = temp_root();
   Paths paths;
@@ -192,12 +203,45 @@ static void test_prompt_state_change_detection() {
   assert(should_render_prompt(paths, config, tasks));
 }
 
+static void test_prompt_disabled_skips_rendering() {
+  auto root = temp_root();
+  Paths paths;
+  paths.state_dir = root;
+  paths.prompt_state_file = root / "prompt.state";
+  Config config;
+  config.prompt_enabled = false;
+
+  std::vector<Task> tasks;
+  tasks.push_back(make_task("One", tasks));
+  assert(!should_render_prompt(paths, config, tasks));
+  config.prompt_enabled = true;
+  assert(should_render_prompt(paths, config, tasks));
+}
+
 static void test_config_validation() {
   assert(!validate_config_key_value("display_style", "compact").has_value());
   assert(validate_config_key_value("display_style", "sparkles").has_value());
   assert(!validate_config_key_value("prompt_align", "right").has_value());
   assert(validate_config_key_value("prompt_align", "center").has_value());
+  assert(!validate_config_key_value("prompt_enabled", "false").has_value());
+  assert(validate_config_key_value("prompt_enabled", "maybe").has_value());
   assert(validate_config_key_value("unknown", "value").has_value());
+}
+
+static void test_prompt_enabled_round_trips_through_config() {
+  auto root = temp_root();
+  Paths paths;
+  paths.config_dir = root;
+  paths.config_file = root / "config";
+
+  Config config;
+  assert(config.prompt_enabled);
+  assert(config_to_map(config).at("prompt_enabled") == "true");
+
+  set_config_value(config, "prompt_enabled", "off");
+  assert(!config.prompt_enabled);
+  save_config(paths, config);
+  assert(!load_config(paths).prompt_enabled);
 }
 
 static void test_legacy_import() {
@@ -238,6 +282,10 @@ static void test_zsh_completions_include_tg() {
   assert(zsh.find("'set:Set a configuration value'") != std::string::npos);
   assert(zsh.find("'prompt_align:Prompt alignment'") != std::string::npos);
   assert(zsh.find("prompt_aligns=(right left)") != std::string::npos);
+  assert(zsh.find("'enable:") != std::string::npos);
+  assert(zsh.find("'disable:") != std::string::npos);
+  assert(zsh.find("'prompt_enabled:") != std::string::npos);
+  assert(zsh.find("config:set:prompt_enabled") != std::string::npos);
 }
 
 int main() {
@@ -251,8 +299,11 @@ int main() {
   test_render_colors_ids_with_muted_terminal_color();
   test_render_ids_expand_until_unique();
   test_render_left_alignment_can_be_configured();
+  test_render_disabled_returns_nothing();
   test_prompt_state_change_detection();
+  test_prompt_disabled_skips_rendering();
   test_config_validation();
+  test_prompt_enabled_round_trips_through_config();
   test_legacy_import();
   test_hooks_include_alias();
   test_zsh_completions_include_tg();

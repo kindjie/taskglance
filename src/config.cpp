@@ -114,7 +114,7 @@ std::optional<std::string> validate_config_key_value(
     }
     return std::nullopt;
   }
-  if (key == "color" || key == "alias_tg") {
+  if (key == "prompt_enabled" || key == "color" || key == "alias_tg") {
     auto normalized = to_lower(trim(value));
     if (!in_set(normalized, {"true", "false", "1", "0", "yes", "no",
                              "on", "off"})) {
@@ -134,6 +134,7 @@ std::map<std::string, std::string> config_to_map(const Config& config) {
      std::to_string(config.prompt_interval_seconds)},
     {"max_prompt_tasks", std::to_string(config.max_prompt_tasks)},
     {"max_prompt_width", std::to_string(config.max_prompt_width)},
+    {"prompt_enabled", bool_string(config.prompt_enabled)},
     {"color", bool_string(config.color)},
     {"alias_tg", bool_string(config.alias_tg)},
   };
@@ -156,6 +157,8 @@ void set_config_value(Config& config, const std::string& key,
     config.max_prompt_tasks = std::stoi(value);
   } else if (key == "max_prompt_width") {
     config.max_prompt_width = std::stoi(value);
+  } else if (key == "prompt_enabled") {
+    config.prompt_enabled = parse_bool(value);
   } else if (key == "color") {
     config.color = parse_bool(value);
   } else if (key == "alias_tg") {

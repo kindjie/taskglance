@@ -25,6 +25,9 @@ std::string command_name(bool alias_tg) {
 
 bool should_render_prompt(const Paths& paths, const Config& config,
                           const std::vector<Task>& tasks) {
+  if (!config.prompt_enabled) {
+    return false;
+  }
   if (config.prompt_mode == "manual") {
     return false;
   }
@@ -139,6 +142,8 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "    'edit:Edit a task'\n";
     out << "    'clear:Clear done tasks'\n";
     out << "    'prompt:Render prompt reminder'\n";
+    out << "    'enable:Enable prompt rendering'\n";
+    out << "    'disable:Disable prompt rendering'\n";
     out << "    'import:Import legacy tasks'\n";
     out << "    'config:Manage configuration'\n";
     out << "    'completions:Generate completions'\n";
@@ -158,6 +163,7 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "    'max_prompt_tasks:Maximum tasks shown in the prompt'\n";
     out << "    'max_prompt_width:Maximum prompt render width'\n";
     out << "    'prompt_align:Prompt alignment'\n";
+    out << "    'prompt_enabled:Render tasks on prompt'\n";
     out << "    'prompt_interval_seconds:Seconds between prompt reminders'\n";
     out << "    'prompt_mode:Prompt rendering mode'\n";
     out << "  )\n";
@@ -191,7 +197,8 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "      ;;\n";
     out << "    arg4)\n";
     out << "      case \"${words[2]}:${words[3]}:${words[4]}\" in\n";
-    out << "        config:set:alias_tg|config:set:color)\n";
+    out << "        config:set:alias_tg|config:set:color|"
+           "config:set:prompt_enabled)\n";
     out << "          _values 'value' \"${bool_values[@]}\"\n";
     out << "          ;;\n";
     out << "        config:set:display_style)\n";
@@ -209,14 +216,14 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
   } else if (shell_name == "bash") {
     out << "_" << command << "_complete() {\n";
     out << "  COMPREPLY=($(compgen -W 'add list done delete edit clear "
-           "prompt import config completions hooks help' -- "
+           "prompt enable disable import config completions hooks help' -- "
            "\"${COMP_WORDS[1]}\"))\n";
     out << "}\n";
     out << "complete -F _" << command << "_complete " << command << "\n";
   } else if (shell_name == "fish") {
     out << "complete -c " << command
-        << " -f -a 'add list done delete edit clear prompt import config "
-           "completions hooks help'\n";
+        << " -f -a 'add list done delete edit clear prompt enable disable "
+           "import config completions hooks help'\n";
   } else {
     out << "Unsupported shell: " << shell << '\n';
   }

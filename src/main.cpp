@@ -30,6 +30,8 @@ Usage:
   taskglance edit <id-prefix> <text>
   taskglance clear --done
   taskglance prompt
+  taskglance enable
+  taskglance disable
   taskglance import zsh-todo-reminder [path]
   taskglance config get|set|list|reset
   taskglance completions zsh|bash|fish [--alias tg]
@@ -196,6 +198,14 @@ int run(int argc, char** argv) {
         taskglance::update_prompt_state(paths, tasks);
       }
     }
+    return 0;
+  }
+
+  if (command == "enable" || command == "disable") {
+    config.prompt_enabled = command == "enable";
+    taskglance::save_config(paths, config);
+    std::cout << "Prompt rendering "
+              << (config.prompt_enabled ? "enabled" : "disabled") << '\n';
     return 0;
   }
 
