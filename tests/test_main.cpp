@@ -1,4 +1,3 @@
-#include <cassert>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +21,18 @@
 namespace fs = std::filesystem;
 using namespace taskglance;
 
+// Deliberately not assert(): NDEBUG, which CMake defines for Release and
+// MinSizeRel builds, expands assert() to nothing and would leave the suite
+// passing unconditionally.
+#define CHECK(condition)                                              \
+  do {                                                                \
+    if (!(condition)) {                                               \
+      std::cerr << "CHECK failed: " #condition "\n  at " << __FILE__  \
+                << ':' << __LINE__ << '\n';                           \
+      std::exit(1);                                                   \
+    }                                                                 \
+  } while (false)
+
 static int process_id() {
 #ifdef _WIN32
   return _getpid();
@@ -40,7 +51,7 @@ static fs::path temp_root() {
 
 static void test_percent_encoding_round_trips() {
   std::string input = "tab\tnewline\npercent% unicode \xE2\x9C\x93";
-  assert(decode_field(encode_field(input)) == input);
+  CHECK(decode_field(encode_field(input)) == input);
 }
 
 static void test_task_persistence() {
@@ -52,9 +63,9 @@ static void test_task_persistence() {
   save_tasks(file, tasks);
 
   auto loaded = load_tasks(file);
-  assert(loaded.size() == 2);
-  assert(loaded[0].text == "Fix auth");
-  assert(loaded[1].status == TaskStatus::Active);
+  CHECK(loaded.size() == 2);
+  CHECK(loaded[0].text == "Fix auth");
+  CHECK(loaded[1].status == TaskStatus::Active);
 }
 
 static void test_done_lookup_ambiguity() {
@@ -66,8 +77,8 @@ static void test_done_lookup_ambiguity() {
 
   std::string error;
   auto found = find_task_by_prefix(tasks, "ab", &error);
-  assert(!found.has_value());
-  assert(error.find("Ambiguous") != std::string::npos);
+  CHECK(!found.has_value());
+  CHECK(error.find("Ambiguous") != std::string::npos);
 }
 
 static void test_render_compact_limits_tasks() {
@@ -79,9 +90,9 @@ static void test_render_compact_limits_tasks() {
   tasks.push_back(make_task("Three", tasks));
 
   auto output = render_tasks(tasks, config, 80, true);
-  assert(output.find("One") != std::string::npos);
-  assert(output.find("Two") != std::string::npos);
-  assert(output.find("+1 more") != std::string::npos);
+  CHECK(output.find("One") != std::string::npos);
+  CHECK(output.find("Two") != std::string::npos);
+  CHECK(output.find("+1 more") != std::string::npos);
 }
 
 static void test_render_aligns_right_by_default() {
@@ -90,10 +101,10 @@ static void test_render_aligns_right_by_default() {
   tasks.push_back(make_task("One", tasks));
 
   auto output = render_tasks(tasks, config, 80, true);
-  assert(!output.empty());
-  assert(output.front() == ' ');
-  assert(output.size() == 80);
-  assert(output.find("tasks: ") != std::string::npos);
+  CHECK(!output.empty());
+  CHECK(output.front() == ' ');
+  CHECK(output.size() == 80);
+  CHECK(output.find("tasks: ") != std::string::npos);
 }
 
 static void test_render_aligns_long_content_to_right_block() {
@@ -109,9 +120,9 @@ static void test_render_aligns_long_content_to_right_block() {
   ));
 
   auto output = render_tasks(tasks, config, 120, true);
-  assert(output.size() == 120);
-  assert(output.rfind(std::string(40, ' '), 0) == 0);
-  assert(output.find("tasks: ") != std::string::npos);
+  CHECK(output.size() == 120);
+  CHECK(output.rfind(std::string(40, ' '), 0) == 0);
+  CHECK(output.find("tasks: ") != std::string::npos);
 }
 
 static void test_render_box_limits_tasks() {
@@ -125,12 +136,12 @@ static void test_render_box_limits_tasks() {
   tasks.push_back(make_task("Three", tasks));
 
   auto output = render_tasks(tasks, config, 80, true);
-  assert(output.find("┌") != std::string::npos);
-  assert(output.find("└") != std::string::npos);
-  assert(output.find("One") != std::string::npos);
-  assert(output.find("Two") != std::string::npos);
-  assert(output.find("Three") == std::string::npos);
-  assert(output.find("+1 more") != std::string::npos);
+  CHECK(output.find("┌") != std::string::npos);
+  CHECK(output.find("└") != std::string::npos);
+  CHECK(output.find("One") != std::string::npos);
+  CHECK(output.find("Two") != std::string::npos);
+  CHECK(output.find("Three") == std::string::npos);
+  CHECK(output.find("+1 more") != std::string::npos);
 }
 
 static void test_render_colors_ids_with_muted_terminal_color() {
@@ -142,8 +153,8 @@ static void test_render_colors_ids_with_muted_terminal_color() {
   tasks[0].id = "abc123";
 
   auto output = render_tasks(tasks, config, 80, true);
-  assert(output.find("\033[90m[ab]\033[39m") != std::string::npos);
-  assert(output.find("\033[90mOne") == std::string::npos);
+  CHECK(output.find("\033[90m[ab]\033[39m") != std::string::npos);
+  CHECK(output.find("\033[90mOne") == std::string::npos);
 }
 
 static void test_render_ids_expand_until_unique() {
@@ -159,10 +170,10 @@ static void test_render_ids_expand_until_unique() {
   tasks[2].id = "cd3333";
 
   auto output = render_tasks(tasks, config, 80, true);
-  assert(output.find("[ab1]") != std::string::npos);
-  assert(output.find("[ab2]") != std::string::npos);
-  assert(output.find("[cd3]") != std::string::npos);
-  assert(output.find("[ab]") == std::string::npos);
+  CHECK(output.find("[ab1]") != std::string::npos);
+  CHECK(output.find("[ab2]") != std::string::npos);
+  CHECK(output.find("[cd3]") != std::string::npos);
+  CHECK(output.find("[ab]") == std::string::npos);
 }
 
 static void test_render_left_alignment_can_be_configured() {
@@ -172,7 +183,7 @@ static void test_render_left_alignment_can_be_configured() {
   tasks.push_back(make_task("One", tasks));
 
   auto output = render_tasks(tasks, config, 80, true);
-  assert(output.rfind("tasks: ", 0) == 0);
+  CHECK(output.rfind("tasks: ", 0) == 0);
 }
 
 static void test_render_disabled_returns_nothing() {
@@ -181,9 +192,9 @@ static void test_render_disabled_returns_nothing() {
   std::vector<Task> tasks;
   tasks.push_back(make_task("One", tasks));
 
-  assert(render_tasks(tasks, config, 80, true).empty());
+  CHECK(render_tasks(tasks, config, 80, true).empty());
   config.prompt_enabled = true;
-  assert(!render_tasks(tasks, config, 80, true).empty());
+  CHECK(!render_tasks(tasks, config, 80, true).empty());
 }
 
 static void test_prompt_state_change_detection() {
@@ -196,11 +207,11 @@ static void test_prompt_state_change_detection() {
 
   std::vector<Task> tasks;
   tasks.push_back(make_task("One", tasks));
-  assert(should_render_prompt(paths, config, tasks));
+  CHECK(should_render_prompt(paths, config, tasks));
   update_prompt_state(paths, tasks);
-  assert(!should_render_prompt(paths, config, tasks));
+  CHECK(!should_render_prompt(paths, config, tasks));
   tasks.push_back(make_task("Two", tasks));
-  assert(should_render_prompt(paths, config, tasks));
+  CHECK(should_render_prompt(paths, config, tasks));
 }
 
 static void test_prompt_disabled_skips_rendering() {
@@ -213,19 +224,19 @@ static void test_prompt_disabled_skips_rendering() {
 
   std::vector<Task> tasks;
   tasks.push_back(make_task("One", tasks));
-  assert(!should_render_prompt(paths, config, tasks));
+  CHECK(!should_render_prompt(paths, config, tasks));
   config.prompt_enabled = true;
-  assert(should_render_prompt(paths, config, tasks));
+  CHECK(should_render_prompt(paths, config, tasks));
 }
 
 static void test_config_validation() {
-  assert(!validate_config_key_value("display_style", "compact").has_value());
-  assert(validate_config_key_value("display_style", "sparkles").has_value());
-  assert(!validate_config_key_value("prompt_align", "right").has_value());
-  assert(validate_config_key_value("prompt_align", "center").has_value());
-  assert(!validate_config_key_value("prompt_enabled", "false").has_value());
-  assert(validate_config_key_value("prompt_enabled", "maybe").has_value());
-  assert(validate_config_key_value("unknown", "value").has_value());
+  CHECK(!validate_config_key_value("display_style", "compact").has_value());
+  CHECK(validate_config_key_value("display_style", "sparkles").has_value());
+  CHECK(!validate_config_key_value("prompt_align", "right").has_value());
+  CHECK(validate_config_key_value("prompt_align", "center").has_value());
+  CHECK(!validate_config_key_value("prompt_enabled", "false").has_value());
+  CHECK(validate_config_key_value("prompt_enabled", "maybe").has_value());
+  CHECK(validate_config_key_value("unknown", "value").has_value());
 }
 
 static void test_prompt_enabled_round_trips_through_config() {
@@ -235,13 +246,13 @@ static void test_prompt_enabled_round_trips_through_config() {
   paths.config_file = root / "config";
 
   Config config;
-  assert(config.prompt_enabled);
-  assert(config_to_map(config).at("prompt_enabled") == "true");
+  CHECK(config.prompt_enabled);
+  CHECK(config_to_map(config).at("prompt_enabled") == "true");
 
   set_config_value(config, "prompt_enabled", "off");
-  assert(!config.prompt_enabled);
+  CHECK(!config.prompt_enabled);
   save_config(paths, config);
-  assert(!load_config(paths).prompt_enabled);
+  CHECK(!load_config(paths).prompt_enabled);
 }
 
 static void test_legacy_import() {
@@ -257,35 +268,35 @@ static void test_legacy_import() {
   }
 
   auto imported = import_zsh_todo_file(file);
-  assert(imported.size() == 2);
-  assert(imported[0].text == "First task");
-  assert(imported[1].text == "Second task");
+  CHECK(imported.size() == 2);
+  CHECK(imported[0].text == "First task");
+  CHECK(imported[1].text == "Second task");
 }
 
 static void test_hooks_include_alias() {
   auto zsh = hook_script("zsh", true, true);
-  assert(zsh.find("alias tg=taskglance") != std::string::npos);
-  assert(zsh.find("autoload -Uz _taskglance") != std::string::npos);
-  assert(zsh.find("compdef _taskglance taskglance") != std::string::npos);
-  assert(zsh.find("compdef _taskglance tg") != std::string::npos);
-  assert(zsh.find("precmd") != std::string::npos);
-  assert(zsh.find("prompt --force") != std::string::npos);
+  CHECK(zsh.find("alias tg=taskglance") != std::string::npos);
+  CHECK(zsh.find("autoload -Uz _taskglance") != std::string::npos);
+  CHECK(zsh.find("compdef _taskglance taskglance") != std::string::npos);
+  CHECK(zsh.find("compdef _taskglance tg") != std::string::npos);
+  CHECK(zsh.find("precmd") != std::string::npos);
+  CHECK(zsh.find("prompt --force") != std::string::npos);
   auto normal = hook_script("zsh", false, false);
-  assert(normal.find("zle -N accept-line") == std::string::npos);
+  CHECK(normal.find("zle -N accept-line") == std::string::npos);
 }
 
 static void test_zsh_completions_include_tg() {
   auto zsh = completion_script("zsh", true);
-  assert(zsh.find("#compdef taskglance tg") != std::string::npos);
-  assert(zsh.find("_arguments -C") != std::string::npos);
-  assert(zsh.find("compdef _taskglance_completion") == std::string::npos);
-  assert(zsh.find("'set:Set a configuration value'") != std::string::npos);
-  assert(zsh.find("'prompt_align:Prompt alignment'") != std::string::npos);
-  assert(zsh.find("prompt_aligns=(right left)") != std::string::npos);
-  assert(zsh.find("'enable:") != std::string::npos);
-  assert(zsh.find("'disable:") != std::string::npos);
-  assert(zsh.find("'prompt_enabled:") != std::string::npos);
-  assert(zsh.find("config:set:prompt_enabled") != std::string::npos);
+  CHECK(zsh.find("#compdef taskglance tg") != std::string::npos);
+  CHECK(zsh.find("_arguments -C") != std::string::npos);
+  CHECK(zsh.find("compdef _taskglance_completion") == std::string::npos);
+  CHECK(zsh.find("'set:Set a configuration value'") != std::string::npos);
+  CHECK(zsh.find("'prompt_align:Prompt alignment'") != std::string::npos);
+  CHECK(zsh.find("prompt_aligns=(right left)") != std::string::npos);
+  CHECK(zsh.find("'enable:") != std::string::npos);
+  CHECK(zsh.find("'disable:") != std::string::npos);
+  CHECK(zsh.find("'prompt_enabled:") != std::string::npos);
+  CHECK(zsh.find("config:set:prompt_enabled") != std::string::npos);
 }
 
 int main() {
