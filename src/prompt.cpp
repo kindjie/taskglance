@@ -137,6 +137,7 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "  commands=(\n";
     out << "    'add:Add a task'\n";
     out << "    'list:List tasks'\n";
+    out << "    'watch:Watch tasks live'\n";
     out << "    'done:Mark a task done'\n";
     out << "    'delete:Delete a task'\n";
     out << "    'edit:Edit a task'\n";
@@ -172,6 +173,13 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "  prompt_aligns=(right left)\n";
     out << "  prompt_modes=(compact transient manual)\n";
     out << "  shells=(zsh bash fish)\n";
+    out << "  if [[ ${words[2]} = watch ]]; then\n";
+    out << "    _arguments -s \\\n";
+    out << "      '1:command:(watch)' \\\n";
+    out << "      '--all[Include done tasks]' \\\n";
+    out << "      '--interval[Polling interval in seconds]:seconds:'\n";
+    out << "    return\n";
+    out << "  fi\n";
     out << "  _arguments -C \\\n";
     out << "    '1:command:->command' \\\n";
     out << "    '2:argument:->arg2' \\\n";
@@ -215,15 +223,33 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "  esac\n";
   } else if (shell_name == "bash") {
     out << "_" << command << "_complete() {\n";
+    out << "  local current=\"${COMP_WORDS[COMP_CWORD]}\"\n";
+    out << "  if (( COMP_CWORD > 1 )); then\n";
+    out << "    if [[ ${COMP_WORDS[1]} = watch &&\n";
+    out << "          ${COMP_WORDS[COMP_CWORD-1]} != --interval ]]; then\n";
+    out << "      COMPREPLY=($(compgen -W '--all --interval' -- "
+           "\"$current\"))\n";
+    out << "    else\n";
+    out << "      COMPREPLY=()\n";
+    out << "    fi\n";
+    out << "    return\n";
+    out << "  fi\n";
     out << "  COMPREPLY=($(compgen -W 'add list done delete edit clear "
-           "prompt enable disable import config completions hooks help' -- "
-           "\"${COMP_WORDS[1]}\"))\n";
+           "watch prompt enable disable import config completions "
+           "hooks help' -- \"$current\"))\n";
     out << "}\n";
     out << "complete -F _" << command << "_complete " << command << "\n";
   } else if (shell_name == "fish") {
     out << "complete -c " << command
-        << " -f -a 'add list done delete edit clear prompt enable disable "
+        << " -f -n '__fish_use_subcommand' "
+           "-a 'add list done delete edit clear watch prompt enable disable "
            "import config completions hooks help'\n";
+    out << "complete -c " << command
+        << " -f -n '__fish_seen_subcommand_from watch' "
+           "-l all -d 'Include done tasks'\n";
+    out << "complete -c " << command
+        << " -f -n '__fish_seen_subcommand_from watch' "
+           "-l interval -r -d 'Polling interval in seconds'\n";
   } else {
     out << "Unsupported shell: " << shell << '\n';
   }

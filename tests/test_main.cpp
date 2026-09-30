@@ -353,6 +353,25 @@ static void test_zsh_completions_include_tg() {
   CHECK(zsh.find("'disable:") != std::string::npos);
   CHECK(zsh.find("'prompt_enabled:") != std::string::npos);
   CHECK(zsh.find("config:set:prompt_enabled") != std::string::npos);
+  CHECK(zsh.find("'watch:") != std::string::npos);
+  CHECK(zsh.find("--interval") != std::string::npos);
+  CHECK(zsh.find("--all") != std::string::npos);
+}
+
+static void test_watch_completions_in_all_shells() {
+  for (const auto* shell : {"zsh", "bash", "fish"}) {
+    auto completion = completion_script(shell, false);
+    CHECK(completion.find("watch") != std::string::npos);
+    CHECK(completion.find("interval") != std::string::npos);
+    CHECK(completion.find("all") != std::string::npos);
+  }
+  auto bash = completion_script("bash", true);
+  CHECK(bash.find("_tg_complete") != std::string::npos);
+  CHECK(bash.find("COMP_WORDS[COMP_CWORD]") != std::string::npos);
+  CHECK(bash.find("COMP_WORDS[COMP_CWORD-1]") != std::string::npos);
+  auto fish = completion_script("fish", false);
+  CHECK(fish.find("__fish_seen_subcommand_from watch") != std::string::npos);
+  CHECK(fish.find("-l interval -r") != std::string::npos);
 }
 
 int main() {
@@ -376,6 +395,7 @@ int main() {
   test_legacy_import();
   test_hooks_include_alias();
   test_zsh_completions_include_tg();
+  test_watch_completions_in_all_shells();
   std::cout << "taskglance tests passed\n";
   return 0;
 }

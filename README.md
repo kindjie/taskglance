@@ -87,6 +87,30 @@ taskglance prompt
 taskglance prompt --force
 ```
 
+## Watch
+
+Keep `taskglance watch` open in a tmux pane to see tasks update as other
+processes or agents change them through the CLI:
+
+```sh
+taskglance watch
+taskglance watch --interval 0.5 --all
+```
+
+Watch is read-only. It polls file contents every second by default;
+`--interval` accepts positive fractional seconds. Active tasks appear oldest
+first, with completed tasks following when `--all` is set. Added or edited
+tasks and status changes appear bold for 10 seconds. The header shows the
+active count and the time (UTC) of the last observed change, initially the
+start time. Long lines are truncated and tasks beyond the pane's height are
+summarized as `+N more`.
+
+Ctrl-C exits cleanly and restores the screen and cursor. When stdout is piped
+or redirected, watch prints a plain frame at startup and after each file
+change, separated by a blank line, without terminal escape sequences.
+
+## Prompt Rendering
+
 Prompt rendering can be turned off globally and back on again:
 
 ```sh
