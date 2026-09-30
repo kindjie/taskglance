@@ -123,6 +123,19 @@ void save_tasks(const std::filesystem::path& file,
   atomic_write_file(file, out.str());
 }
 
+void update_tasks(
+  const std::filesystem::path& file,
+  const std::function<bool(std::vector<Task>&)>& change
+) {
+  auto lock_file = file;
+  lock_file += ".lock";
+  FileLock lock(lock_file);
+  auto tasks = load_tasks(file);
+  if (change(tasks)) {
+    save_tasks(file, tasks);
+  }
+}
+
 Task make_task(const std::string& text, const std::vector<Task>& existing) {
   Task task;
   task.status = TaskStatus::Active;

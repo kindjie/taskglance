@@ -107,10 +107,12 @@ int run(int argc, char** argv) {
 
   if (command == "add") {
     auto text = rest(2, argc, argv);
-    auto tasks = taskglance::load_tasks(paths.tasks_file);
-    auto task = taskglance::make_task(text, tasks);
-    tasks.push_back(task);
-    taskglance::save_tasks(paths.tasks_file, tasks);
+    taskglance::Task task;
+    taskglance::update_tasks(paths.tasks_file, [&](auto& tasks) {
+      task = taskglance::make_task(text, tasks);
+      tasks.push_back(task);
+      return true;
+    });
     std::cout << "Added [" << task.id << "] " << task.text << '\n';
     return 0;
   }
@@ -125,23 +127,29 @@ int run(int argc, char** argv) {
       std::cerr << command << " requires an id prefix\n";
       return 2;
     }
-    auto tasks = taskglance::load_tasks(paths.tasks_file);
     std::string error;
-    auto index = taskglance::find_task_by_prefix(tasks, argv[2], &error);
-    if (!index) {
+    std::string message;
+    taskglance::update_tasks(paths.tasks_file, [&](auto& tasks) {
+      auto index = taskglance::find_task_by_prefix(tasks, argv[2], &error);
+      if (!index) {
+        return false;
+      }
+      auto& task = tasks[*index];
+      if (command == "done") {
+        task.status = TaskStatus::Done;
+        task.completed_at = std::chrono::system_clock::now();
+        message = "Done [" + task.id + "] " + task.text;
+      } else {
+        message = "Deleted [" + task.id + "] " + task.text;
+        tasks.erase(tasks.begin() + static_cast<long>(*index));
+      }
+      return true;
+    });
+    if (!error.empty()) {
       std::cerr << error << '\n';
       return 1;
     }
-    auto& task = tasks[*index];
-    if (command == "done") {
-      task.status = TaskStatus::Done;
-      task.completed_at = std::chrono::system_clock::now();
-      std::cout << "Done [" << task.id << "] " << task.text << '\n';
-    } else {
-      std::cout << "Deleted [" << task.id << "] " << task.text << '\n';
-      tasks.erase(tasks.begin() + static_cast<long>(*index));
-    }
-    taskglance::save_tasks(paths.tasks_file, tasks);
+    std::cout << message << '\n';
     return 0;
   }
 
@@ -150,17 +158,23 @@ int run(int argc, char** argv) {
       std::cerr << "edit requires an id prefix and text\n";
       return 2;
     }
-    auto tasks = taskglance::load_tasks(paths.tasks_file);
     std::string error;
-    auto index = taskglance::find_task_by_prefix(tasks, argv[2], &error);
-    if (!index) {
+    taskglance::Task updated;
+    taskglance::update_tasks(paths.tasks_file, [&](auto& tasks) {
+      auto index = taskglance::find_task_by_prefix(tasks, argv[2], &error);
+      if (!index) {
+        return false;
+      }
+      tasks[*index].text =
+        taskglance::sanitize_task_text(rest(3, argc, argv));
+      updated = tasks[*index];
+      return true;
+    });
+    if (!error.empty()) {
       std::cerr << error << '\n';
       return 1;
     }
-    tasks[*index].text = taskglance::sanitize_task_text(rest(3, argc, argv));
-    taskglance::save_tasks(paths.tasks_file, tasks);
-    std::cout << "Updated [" << tasks[*index].id << "] "
-              << tasks[*index].text << '\n';
+    std::cout << "Updated [" << updated.id << "] " << updated.text << '\n';
     return 0;
   }
 
@@ -169,16 +183,19 @@ int run(int argc, char** argv) {
       std::cerr << "clear currently supports only --done\n";
       return 2;
     }
-    auto tasks = taskglance::load_tasks(paths.tasks_file);
-    auto before = tasks.size();
-    tasks.erase(
-      std::remove_if(tasks.begin(), tasks.end(), [](const auto& task) {
-        return task.status == TaskStatus::Done;
-      }),
-      tasks.end()
-    );
-    taskglance::save_tasks(paths.tasks_file, tasks);
-    std::cout << "Cleared " << (before - tasks.size()) << " done tasks\n";
+    std::size_t cleared = 0;
+    taskglance::update_tasks(paths.tasks_file, [&](auto& tasks) {
+      auto before = tasks.size();
+      tasks.erase(
+        std::remove_if(tasks.begin(), tasks.end(), [](const auto& task) {
+          return task.status == TaskStatus::Done;
+        }),
+        tasks.end()
+      );
+      cleared = before - tasks.size();
+      return true;
+    });
+    std::cout << "Cleared " << cleared << " done tasks\n";
     return 0;
   }
 
@@ -217,12 +234,13 @@ int run(int argc, char** argv) {
     auto path = argc >= 4 ? std::filesystem::path(argv[3])
                           : default_legacy_path();
     auto imported = taskglance::import_zsh_todo_file(path);
-    auto tasks = taskglance::load_tasks(paths.tasks_file);
-    for (auto& task : imported) {
-      task.id = taskglance::make_task(task.text, tasks).id;
-      tasks.push_back(task);
-    }
-    taskglance::save_tasks(paths.tasks_file, tasks);
+    taskglance::update_tasks(paths.tasks_file, [&](auto& tasks) {
+      for (auto& task : imported) {
+        task.id = taskglance::make_task(task.text, tasks).id;
+        tasks.push_back(task);
+      }
+      return true;
+    });
     std::cout << "Imported " << imported.size() << " tasks from "
               << path << '\n';
     return 0;
