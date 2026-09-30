@@ -8,15 +8,13 @@
 #include "taskglance/util.hpp"
 
 namespace taskglance {
-namespace {
-
 std::string task_label(const Task& task, std::size_t id_width) {
   return "[" + task.id.substr(0, id_width) + "] " + task.text;
 }
 
 std::size_t unique_id_width(const std::vector<Task>& tasks,
-                            std::size_t minimum) {
-  auto active = active_tasks(tasks);
+                            std::size_t minimum, bool include_done) {
+  auto active = include_done ? tasks : active_tasks(tasks);
   if (active.empty()) {
     return minimum;
   }
@@ -49,6 +47,8 @@ std::size_t unique_id_width(const std::vector<Task>& tasks,
   return max_width;
 }
 
+namespace {
+
 std::optional<std::size_t> id_token_length(const std::string& value,
                                            std::size_t offset) {
   if (offset + 3 >= value.size() || value[offset] != '[') {
@@ -65,6 +65,8 @@ std::optional<std::size_t> id_token_length(const std::string& value,
   }
   return cursor - offset + 1;
 }
+
+}  // namespace
 
 std::string color_task_ids(const std::string& rendered,
                            const Config& config) {
@@ -86,6 +88,8 @@ std::string color_task_ids(const std::string& rendered,
   }
   return output;
 }
+
+namespace {
 
 std::string pad_display(std::string text, int width) {
   text = truncate_display(text, width);

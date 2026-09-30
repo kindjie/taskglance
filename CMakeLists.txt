@@ -27,6 +27,7 @@ add_library(taskglance_core
   src/render.cpp
   src/store.cpp
   src/util.cpp
+  src/watch.cpp
 )
 
 target_include_directories(taskglance_core PUBLIC include)
@@ -83,6 +84,9 @@ if(TASKGLANCE_BUILD_TESTS)
     PRIVATE taskglance_core Threads::Threads
   )
   add_test(NAME taskglance_tests COMMAND taskglance_tests)
+  add_executable(taskglance_watch_tests tests/test_watch.cpp)
+  target_link_libraries(taskglance_watch_tests PRIVATE taskglance_core)
+  add_test(NAME taskglance_watch_tests COMMAND taskglance_watch_tests)
   add_test(NAME taskglance_concurrent_cli
     COMMAND ${CMAKE_COMMAND}
             -DTASKGLANCE=$<TARGET_FILE:taskglance>
