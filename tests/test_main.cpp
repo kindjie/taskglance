@@ -316,10 +316,10 @@ static void test_legacy_import() {
   auto file = root / "data.save";
   {
     std::ofstream out(file);
-    const std::string tasks("First task\0Second task\n", 23);
-    const std::string colors("\033[38;5;167m\0\033[38;5;71m\n", 27);
-    out.write(tasks.data(), static_cast<std::streamsize>(tasks.size()));
-    out.write(colors.data(), static_cast<std::streamsize>(colors.size()));
+    constexpr char tasks[] = "First task\0Second task\n";
+    constexpr char colors[] = "\033[38;5;167m\0\033[38;5;71m\n";
+    out.write(tasks, sizeof(tasks) - 1);
+    out.write(colors, sizeof(colors) - 1);
     out << "3\n";
   }
 
