@@ -67,6 +67,15 @@ static void test_task_persistence() {
   CHECK(loaded.size() == 2);
   CHECK(loaded[0].text == "Fix auth");
   CHECK(loaded[1].status == TaskStatus::Active);
+  auto snapshot = read_task_file(file);
+  auto parsed = parse_tasks(snapshot);
+  CHECK(parsed.size() == loaded.size());
+  CHECK(parsed[0].id == loaded[0].id);
+  CHECK(parsed[0].text == loaded[0].text);
+  CHECK(parsed[0].created_at == loaded[0].created_at);
+  CHECK(parsed[1].status == loaded[1].status);
+  CHECK(read_task_file(root / "missing.tsv").empty());
+  CHECK(parse_tasks("").empty());
 }
 
 static void test_concurrent_updates_keep_every_change() {

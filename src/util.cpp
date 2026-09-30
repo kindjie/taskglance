@@ -130,9 +130,17 @@ void write_synced_file(const std::filesystem::path& file,
 void durable_rename(const std::filesystem::path& from,
                     const std::filesystem::path& to) {
 #ifdef _WIN32
-  if (!::MoveFileExW(from.c_str(), to.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-    throw std::runtime_error("Could not replace " + to.string());
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    if (::MoveFileExW(from.c_str(), to.c_str(),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      return;
+    }
+    auto error = ::GetLastError();
+    if ((error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) ||
+        attempt == 9) {
+      throw std::runtime_error("Could not replace " + to.string());
+    }
+    ::Sleep(10);
   }
 #else
   std::filesystem::rename(from, to);

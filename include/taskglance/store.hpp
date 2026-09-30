@@ -22,6 +22,10 @@ struct Task {
   std::string text;
 };
 
+// A single snapshot for byte comparison and parsing; missing files are empty.
+std::string read_task_file(const std::filesystem::path& file);
+std::vector<Task> parse_tasks(const std::string& content);
+
 std::vector<Task> load_tasks(const std::filesystem::path& file);
 void save_tasks(const std::filesystem::path& file,
                 const std::vector<Task>& tasks);

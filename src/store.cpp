@@ -7,6 +7,16 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 #include "taskglance/util.hpp"
 
 namespace taskglance {
@@ -80,13 +90,10 @@ std::string sanitize_task_text(const std::string& text) {
   return output;
 }
 
-std::vector<Task> load_tasks(const std::filesystem::path& file) {
-  std::vector<Task> tasks;
-  std::ifstream in(file, std::ios::binary);
-  if (!in) {
-    return tasks;
-  }
+namespace {
 
+std::vector<Task> parse_task_stream(std::istream& in) {
+  std::vector<Task> tasks;
   std::string line;
   while (std::getline(in, line)) {
     if (trim(line).empty()) {
@@ -107,6 +114,80 @@ std::vector<Task> load_tasks(const std::filesystem::path& file) {
     tasks.push_back(task);
   }
   return tasks;
+}
+
+}  // namespace
+
+std::string read_task_file(const std::filesystem::path& file) {
+#ifdef _WIN32
+  struct Reader {
+    HANDLE handle;
+    ~Reader() {
+      if (handle != INVALID_HANDLE_VALUE) {
+        ::CloseHandle(handle);
+      }
+    }
+  } reader{::CreateFileW(
+    file.c_str(), GENERIC_READ,
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr
+  )};
+  if (reader.handle == INVALID_HANDLE_VALUE) {
+    auto error = ::GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+      return "";
+    }
+    throw std::runtime_error("Could not read " + file.string());
+  }
+  std::string content;
+  char buffer[4096];
+  DWORD read = 0;
+  for (;;) {
+    if (!::ReadFile(reader.handle, buffer, sizeof(buffer), &read, nullptr)) {
+      throw std::runtime_error("Could not read " + file.string());
+    }
+    if (read == 0) {
+      break;
+    }
+    content.append(buffer, read);
+  }
+  return content;
+#else
+  std::ifstream in(file, std::ios::binary);
+  if (!in) {
+    std::error_code error;
+    if (!std::filesystem::exists(file, error) && !error) {
+      return "";
+    }
+    throw std::runtime_error("Could not read " + file.string());
+  }
+  std::string content;
+  char buffer[4096];
+  while (in.read(buffer, sizeof(buffer)) || in.gcount() > 0) {
+    content.append(buffer, static_cast<std::size_t>(in.gcount()));
+  }
+  if (!in.eof()) {
+    throw std::runtime_error("Could not read " + file.string());
+  }
+  return content;
+#endif
+}
+
+std::vector<Task> parse_tasks(const std::string& content) {
+  std::istringstream in(content);
+  return parse_task_stream(in);
+}
+
+std::vector<Task> load_tasks(const std::filesystem::path& file) {
+#ifdef _WIN32
+  return parse_tasks(read_task_file(file));
+#else
+  std::ifstream in(file, std::ios::binary);
+  if (!in) {
+    return {};
+  }
+  return parse_task_stream(in);
+#endif
 }
 
 void save_tasks(const std::filesystem::path& file,
