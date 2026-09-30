@@ -27,6 +27,7 @@ add_library(taskglance_core
   src/render.cpp
   src/store.cpp
   src/util.cpp
+  src/watch.cpp
 )
 
 target_include_directories(taskglance_core PUBLIC include)
@@ -39,7 +40,7 @@ else()
   target_compile_options(taskglance_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_executable(taskglance src/main.cpp)
+add_executable(taskglance src/main.cpp src/watch_terminal.cpp)
 target_link_libraries(taskglance PRIVATE taskglance_core)
 
 install(TARGETS taskglance RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -83,6 +84,22 @@ if(TASKGLANCE_BUILD_TESTS)
     PRIVATE taskglance_core Threads::Threads
   )
   add_test(NAME taskglance_tests COMMAND taskglance_tests)
+  add_executable(taskglance_watch_tests tests/test_watch.cpp)
+  target_link_libraries(taskglance_watch_tests PRIVATE taskglance_core)
+  add_test(NAME taskglance_watch_tests COMMAND taskglance_watch_tests)
+  add_test(NAME taskglance_watch_arguments
+    COMMAND ${CMAKE_COMMAND}
+            -DTASKGLANCE=$<TARGET_FILE:taskglance>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/watch_arguments.cmake
+  )
+  set_tests_properties(taskglance_watch_arguments PROPERTIES TIMEOUT 25)
+  add_test(NAME taskglance_watch_live
+    COMMAND ${CMAKE_COMMAND}
+            -DTASKGLANCE=$<TARGET_FILE:taskglance>
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/watch-live
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/watch_live.cmake
+  )
+  set_tests_properties(taskglance_watch_live PROPERTIES TIMEOUT 20)
   add_test(NAME taskglance_concurrent_cli
     COMMAND ${CMAKE_COMMAND}
             -DTASKGLANCE=$<TARGET_FILE:taskglance>

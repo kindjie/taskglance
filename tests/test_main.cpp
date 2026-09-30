@@ -67,6 +67,15 @@ static void test_task_persistence() {
   CHECK(loaded.size() == 2);
   CHECK(loaded[0].text == "Fix auth");
   CHECK(loaded[1].status == TaskStatus::Active);
+  auto snapshot = read_task_file(file);
+  auto parsed = parse_tasks(snapshot);
+  CHECK(parsed.size() == loaded.size());
+  CHECK(parsed[0].id == loaded[0].id);
+  CHECK(parsed[0].text == loaded[0].text);
+  CHECK(parsed[0].created_at == loaded[0].created_at);
+  CHECK(parsed[1].status == loaded[1].status);
+  CHECK(read_task_file(root / "missing.tsv").empty());
+  CHECK(parse_tasks("").empty());
 }
 
 static void test_concurrent_updates_keep_every_change() {
@@ -307,10 +316,10 @@ static void test_legacy_import() {
   auto file = root / "data.save";
   {
     std::ofstream out(file);
-    const std::string tasks("First task\0Second task\n", 23);
-    const std::string colors("\033[38;5;167m\0\033[38;5;71m\n", 27);
-    out.write(tasks.data(), static_cast<std::streamsize>(tasks.size()));
-    out.write(colors.data(), static_cast<std::streamsize>(colors.size()));
+    constexpr char tasks[] = "First task\0Second task\n";
+    constexpr char colors[] = "\033[38;5;167m\0\033[38;5;71m\n";
+    out.write(tasks, sizeof(tasks) - 1);
+    out.write(colors, sizeof(colors) - 1);
     out << "3\n";
   }
 
@@ -344,6 +353,25 @@ static void test_zsh_completions_include_tg() {
   CHECK(zsh.find("'disable:") != std::string::npos);
   CHECK(zsh.find("'prompt_enabled:") != std::string::npos);
   CHECK(zsh.find("config:set:prompt_enabled") != std::string::npos);
+  CHECK(zsh.find("'watch:") != std::string::npos);
+  CHECK(zsh.find("--interval") != std::string::npos);
+  CHECK(zsh.find("--all") != std::string::npos);
+}
+
+static void test_watch_completions_in_all_shells() {
+  for (const auto* shell : {"zsh", "bash", "fish"}) {
+    auto completion = completion_script(shell, false);
+    CHECK(completion.find("watch") != std::string::npos);
+    CHECK(completion.find("interval") != std::string::npos);
+    CHECK(completion.find("all") != std::string::npos);
+  }
+  auto bash = completion_script("bash", true);
+  CHECK(bash.find("_tg_complete") != std::string::npos);
+  CHECK(bash.find("COMP_WORDS[COMP_CWORD]") != std::string::npos);
+  CHECK(bash.find("COMP_WORDS[COMP_CWORD-1]") != std::string::npos);
+  auto fish = completion_script("fish", false);
+  CHECK(fish.find("__fish_seen_subcommand_from watch") != std::string::npos);
+  CHECK(fish.find("-l interval -r") != std::string::npos);
 }
 
 int main() {
@@ -367,6 +395,7 @@ int main() {
   test_legacy_import();
   test_hooks_include_alias();
   test_zsh_completions_include_tg();
+  test_watch_completions_in_all_shells();
   std::cout << "taskglance tests passed\n";
   return 0;
 }

@@ -12,6 +12,7 @@
 #include "taskglance/render.hpp"
 #include "taskglance/store.hpp"
 #include "taskglance/util.hpp"
+#include "watch_terminal.hpp"
 
 namespace {
 
@@ -25,6 +26,7 @@ std::string usage() {
 Usage:
   taskglance add <text>
   taskglance list
+  taskglance watch [--interval <seconds>] [--all]
   taskglance done <id-prefix>
   taskglance delete <id-prefix>
   taskglance edit <id-prefix> <text>
@@ -120,6 +122,32 @@ int run(int argc, char** argv) {
   if (command == "list") {
     print_tasks(taskglance::load_tasks(paths.tasks_file));
     return 0;
+  }
+
+  if (command == "watch") {
+    double interval = 1;
+    taskglance::WatchOptions options;
+    options.tty = taskglance::stdout_is_tty();
+    options.color = config.color;
+    for (int i = 2; i < argc; ++i) {
+      std::string argument = argv[i];
+      if (argument == "--all") {
+        options.all = true;
+      } else if (argument == "--interval") {
+        auto parsed = i + 1 < argc
+                        ? taskglance::parse_watch_interval(argv[++i])
+                        : std::nullopt;
+        if (!parsed) {
+          std::cerr << "watch --interval requires seconds, at least 0.1\n";
+          return 2;
+        }
+        interval = *parsed;
+      } else {
+        std::cerr << "Unknown watch option: " << argument << '\n';
+        return 2;
+      }
+    }
+    return run_watch(paths.tasks_file, interval, options);
   }
 
   if (command == "done" || command == "delete") {
