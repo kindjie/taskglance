@@ -130,6 +130,10 @@ Tasks use XDG paths by default:
 
 If the XDG variables are unset, standard home-directory fallbacks are used.
 
+Commands that change tasks hold an exclusive lock on `tasks.tsv.lock` beside
+the data file, so concurrent `taskglance` invocations cannot lose each other's
+changes. Saves are synced to disk and replace the file atomically.
+
 ## Legacy Import
 
 ```sh

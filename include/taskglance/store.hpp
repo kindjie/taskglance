@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -24,6 +25,14 @@ struct Task {
 std::vector<Task> load_tasks(const std::filesystem::path& file);
 void save_tasks(const std::filesystem::path& file,
                 const std::vector<Task>& tasks);
+
+// Loads the tasks, applies change, and saves the result if change returns
+// true, all under an exclusive lock so concurrent writers cannot lose each
+// other's changes. Every read-modify-write of the task file goes through here.
+void update_tasks(
+  const std::filesystem::path& file,
+  const std::function<bool(std::vector<Task>&)>& change
+);
 
 Task make_task(const std::string& text,
                const std::vector<Task>& existing_tasks);

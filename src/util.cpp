@@ -1,5 +1,6 @@
 #include "taskglance/util.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <climits>
 #include <cstdio>
@@ -13,9 +14,20 @@
 #include <stdexcept>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <fcntl.h>
 #include <io.h>
 #include <process.h>
+#include <sys/stat.h>
 #else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
@@ -48,6 +60,89 @@ int char_display_width(wchar_t wide) {
 #else
   int width = ::wcwidth(wide);
   return width > 0 ? width : 0;
+#endif
+}
+
+
+// Flushes fd to stable storage. On macOS fsync() can leave data in the
+// drive's volatile cache, so prefer F_FULLFSYNC where the filesystem has it.
+bool sync_fd(int fd) {
+#ifdef _WIN32
+  return ::_commit(fd) == 0;
+#else
+#ifdef F_FULLFSYNC
+  if (::fcntl(fd, F_FULLFSYNC) == 0) {
+    return true;
+  }
+#endif
+  return ::fsync(fd) == 0;
+#endif
+}
+
+void write_synced_file(const std::filesystem::path& file,
+                       const std::string& content) {
+#ifdef _WIN32
+  int fd = ::_wopen(file.c_str(),
+                    _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+                    _S_IREAD | _S_IWRITE);
+#else
+  int fd = ::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+                  0666);
+#endif
+  if (fd < 0) {
+    throw std::runtime_error("Could not write " + file.string());
+  }
+  const char* data = content.data();
+  std::size_t remaining = content.size();
+  bool ok = true;
+  while (ok && remaining > 0) {
+#ifdef _WIN32
+    auto chunk = static_cast<unsigned int>(
+      std::min<std::size_t>(remaining, INT_MAX)
+    );
+    auto written = ::_write(fd, data, chunk);
+#else
+    auto written = ::write(fd, data, remaining);
+    if (written < 0 && errno == EINTR) {
+      continue;
+    }
+#endif
+    ok = written > 0;
+    if (ok) {
+      data += written;
+      remaining -= static_cast<std::size_t>(written);
+    }
+  }
+  ok = ok && sync_fd(fd);
+#ifdef _WIN32
+  ok = ::_close(fd) == 0 && ok;
+#else
+  ok = ::close(fd) == 0 && ok;
+#endif
+  if (!ok) {
+    throw std::runtime_error("Could not write " + file.string());
+  }
+}
+
+// Replaces to with from and makes the rename durable. Failing to sync the
+// directory is not fatal: the new content is already in place, so reporting
+// failure would misstate what happened.
+void durable_rename(const std::filesystem::path& from,
+                    const std::filesystem::path& to) {
+#ifdef _WIN32
+  if (!::MoveFileExW(from.c_str(), to.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    throw std::runtime_error("Could not replace " + to.string());
+  }
+#else
+  std::filesystem::rename(from, to);
+  auto parent = to.parent_path();
+  int fd = ::open(parent.empty() ? "." : parent.c_str(),
+                  O_RDONLY | O_CLOEXEC);
+  if (fd >= 0) {
+    ::fsync(fd);
+    ::close(fd);
+  }
 #endif
 }
 
@@ -168,19 +263,56 @@ void atomic_write_file(const std::filesystem::path& file,
   ensure_parent_dir(file);
   auto temp = file;
   temp += ".tmp." + std::to_string(process_id());
-  {
-    std::ofstream out(temp, std::ios::binary);
-    if (!out) {
-      throw std::runtime_error("Could not write " + temp.string());
-    }
-    out << content;
-    out.flush();
-    if (!out) {
-      throw std::runtime_error("Could not flush " + temp.string());
+  write_synced_file(temp, content);
+  durable_rename(temp, file);
+}
+
+#ifdef _WIN32
+FileLock::FileLock(const std::filesystem::path& path) {
+  ensure_parent_dir(path);
+  handle_ = ::CreateFileW(
+    path.c_str(), GENERIC_READ | GENERIC_WRITE,
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr
+  );
+  if (handle_ == INVALID_HANDLE_VALUE) {
+    throw std::runtime_error("Could not open lock " + path.string());
+  }
+  OVERLAPPED overlapped {};
+  if (!::LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD,
+                    &overlapped)) {
+    ::CloseHandle(handle_);
+    throw std::runtime_error("Could not lock " + path.string());
+  }
+}
+
+FileLock::~FileLock() {
+  // Closing the handle releases the lock.
+  ::CloseHandle(handle_);
+}
+#else
+FileLock::FileLock(const std::filesystem::path& path) {
+  ensure_parent_dir(path);
+  fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  if (fd_ < 0) {
+    throw std::runtime_error("Could not open lock " + path.string() + ": " +
+                             std::strerror(errno));
+  }
+  while (::flock(fd_, LOCK_EX) != 0) {
+    if (errno != EINTR) {
+      auto error = errno;
+      ::close(fd_);
+      throw std::runtime_error("Could not lock " + path.string() + ": " +
+                               std::strerror(error));
     }
   }
-  std::filesystem::rename(temp, file);
 }
+
+FileLock::~FileLock() {
+  // Closing the descriptor releases the lock.
+  ::close(fd_);
+}
+#endif
 
 std::uint64_t fnv1a64(const std::string& value) {
   std::uint64_t hash = kFnvOffset;

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -66,6 +67,52 @@ static void test_task_persistence() {
   CHECK(loaded.size() == 2);
   CHECK(loaded[0].text == "Fix auth");
   CHECK(loaded[1].status == TaskStatus::Active);
+}
+
+static void test_concurrent_updates_keep_every_change() {
+  auto root = temp_root();
+  auto file = root / "tasks.tsv";
+  constexpr int kWriters = 8;
+  constexpr int kAddsPerWriter = 25;
+
+  // Each writer opens its own lock handle, so the lock excludes threads in
+  // one process just as it excludes separate taskglance processes.
+  std::vector<std::thread> writers;
+  for (int writer = 0; writer < kWriters; ++writer) {
+    writers.emplace_back([&file, writer] {
+      for (int add = 0; add < kAddsPerWriter; ++add) {
+        update_tasks(file, [&](std::vector<Task>& tasks) {
+          auto text = "w" + std::to_string(writer) + " a" +
+                      std::to_string(add);
+          tasks.push_back(make_task(text, tasks));
+          return true;
+        });
+      }
+    });
+  }
+  for (auto& writer : writers) {
+    writer.join();
+  }
+
+  CHECK(load_tasks(file).size() == kWriters * kAddsPerWriter);
+}
+
+static void test_declined_update_leaves_file_untouched() {
+  auto root = temp_root();
+  auto file = root / "tasks.tsv";
+  update_tasks(file, [](std::vector<Task>& tasks) {
+    tasks.push_back(make_task("Keep me", tasks));
+    return true;
+  });
+  auto before = fs::last_write_time(file);
+
+  update_tasks(file, [](std::vector<Task>& tasks) {
+    tasks.clear();
+    return false;
+  });
+
+  CHECK(fs::last_write_time(file) == before);
+  CHECK(load_tasks(file).size() == 1);
 }
 
 static void test_done_lookup_ambiguity() {
@@ -302,6 +349,8 @@ static void test_zsh_completions_include_tg() {
 int main() {
   test_percent_encoding_round_trips();
   test_task_persistence();
+  test_concurrent_updates_keep_every_change();
+  test_declined_update_leaves_file_untouched();
   test_done_lookup_ambiguity();
   test_render_compact_limits_tasks();
   test_render_aligns_right_by_default();

@@ -78,6 +78,15 @@ if(TASKGLANCE_BUILD_TESTS)
   add_executable(taskglance_tests
     tests/test_main.cpp
   )
-  target_link_libraries(taskglance_tests PRIVATE taskglance_core)
+  find_package(Threads REQUIRED)
+  target_link_libraries(taskglance_tests
+    PRIVATE taskglance_core Threads::Threads
+  )
   add_test(NAME taskglance_tests COMMAND taskglance_tests)
+  add_test(NAME taskglance_concurrent_cli
+    COMMAND ${CMAKE_COMMAND}
+            -DTASKGLANCE=$<TARGET_FILE:taskglance>
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrent-cli
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrent_cli.cmake
+  )
 endif()
