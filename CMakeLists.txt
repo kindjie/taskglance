@@ -22,6 +22,7 @@ set(TASKGLANCE_FISH_COMPLETION_DIR
 
 add_library(taskglance_core
   src/config.cpp
+  src/interactive.cpp
   src/legacy.cpp
   src/prompt.cpp
   src/render.cpp
@@ -87,6 +88,10 @@ if(TASKGLANCE_BUILD_TESTS)
   add_executable(taskglance_watch_tests tests/test_watch.cpp)
   target_link_libraries(taskglance_watch_tests PRIVATE taskglance_core)
   add_test(NAME taskglance_watch_tests COMMAND taskglance_watch_tests)
+  add_executable(taskglance_interactive_tests tests/test_interactive.cpp)
+  target_link_libraries(taskglance_interactive_tests PRIVATE taskglance_core)
+  add_test(NAME taskglance_interactive_tests
+    COMMAND taskglance_interactive_tests)
   add_test(NAME taskglance_watch_arguments
     COMMAND ${CMAKE_COMMAND}
             -DTASKGLANCE=$<TARGET_FILE:taskglance>

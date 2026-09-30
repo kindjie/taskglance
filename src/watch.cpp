@@ -44,10 +44,12 @@ std::optional<char32_t> decode_utf8(const std::string& text,
   return value;
 }
 
+}  // namespace
+
 // Task text comes from any process that can write the task file. Keep
 // well-formed printable UTF-8 and replace everything a terminal could act
 // on (C0, DEL, C1 in raw or encoded form, malformed bytes) with '?'.
-std::string terminal_safe(const std::string& text) {
+std::string terminal_safe_text(const std::string& text) {
   std::string output;
   for (std::size_t i = 0; i < text.size();) {
     auto byte = static_cast<unsigned char>(text[i]);
@@ -68,9 +70,6 @@ std::string terminal_safe(const std::string& text) {
   }
   return output;
 }
-
-}  // namespace
-
 
 std::string format_local_clock(std::chrono::system_clock::time_point time) {
   auto seconds = std::chrono::system_clock::to_time_t(time);
@@ -168,7 +167,7 @@ std::string build_watch_frame(
     // Stored/imported data can contain controls; only our styles may emit
     // escape sequences, and truncation must happen before styling.
     auto line = truncate_display(
-      terminal_safe(sanitize_task_text(task_label(task, id_width))), width
+      terminal_safe_text(sanitize_task_text(task_label(task, id_width))), width
     );
     line = color_task_ids(line, colors);
     if (options.tty) {
