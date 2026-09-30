@@ -8,7 +8,7 @@ foreach(value IN ITEMS 0 -1 bogus 1x nan inf 1e999 0.05)
     ERROR_VARIABLE error
     TIMEOUT 2
   )
-  if(NOT result STREQUAL "2" OR error STREQUAL "" OR
+  if(NOT result STREQUAL "2" OR NOT error MATCHES "at least 0\\.1" OR
      NOT output STREQUAL "")
     message(FATAL_ERROR "watch accepted '${value}': ${result}, ${error}")
   endif()

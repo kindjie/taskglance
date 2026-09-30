@@ -138,7 +138,7 @@ int run(int argc, char** argv) {
                         ? taskglance::parse_watch_interval(argv[++i])
                         : std::nullopt;
         if (!parsed) {
-          std::cerr << "watch --interval requires positive finite seconds\n";
+          std::cerr << "watch --interval requires seconds, at least 0.1\n";
           return 2;
         }
         interval = *parsed;
