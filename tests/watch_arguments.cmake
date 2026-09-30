@@ -1,6 +1,6 @@
 # Even malformed watch commands must be bounded if a regression starts
 # polling instead of rejecting the argument.
-foreach(value IN ITEMS 0 -1 bogus 1x nan inf 1e999)
+foreach(value IN ITEMS 0 -1 bogus 1x nan inf 1e999 0.05)
   execute_process(
     COMMAND "${TASKGLANCE}" watch --interval "${value}"
     RESULT_VARIABLE result

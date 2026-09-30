@@ -116,12 +116,61 @@ static void test_frames() {
   CHECK(frame(tasks, options).find("[ab12] Done") != std::string::npos);
 }
 
+static void test_task_text_cannot_emit_controls() {
+  WatchOptions options;
+  options.tty = true;
+  for (const auto* text : {"a\x9b" "2Jb", "a\xc2\x9b" "2Jb",
+                           "a\x1b[2Jb", "a\x7f" "b", "a\xff\xfe" "b",
+                           "a\xe2\x82" "b"}) {
+    for (bool tty : {false, true}) {
+      options.tty = tty;
+      auto rendered = frame({task("ab1111", text)}, options);
+      auto line = rendered.substr(rendered.find("[ab"));
+      for (unsigned char ch : line) {
+        // Only the frame's own SGR styling may use ESC.
+        CHECK(ch != 0x9b && ch != 0x7f && ch != 0xff && ch != 0xfe);
+      }
+      CHECK(line.find("\xc2\x9b") == std::string::npos);
+      CHECK(line.find("[2J") == std::string::npos ||
+            line.find("\x1b[2J") == std::string::npos);
+    }
+  }
+  auto utf8 = frame({task("ab1111", "caf\xc3\xa9 \xe2\x9c\x93")});
+  CHECK(utf8.find("caf\xc3\xa9 \xe2\x9c\x93") != std::string::npos);
+}
+
+static void test_tty_frames_leave_last_column_free() {
+  // Writing the final column leaves the cursor pending a wrap, where the
+  // erase that follows would delete it (or Windows wraps immediately).
+  WatchOptions options;
+  options.tty = true;
+  options.color = false;
+  std::vector<Task> tasks{task("ab1111", std::string(100, 'x'))};
+  for (int width : {2, 8, 20, 80}) {
+    std::istringstream in(frame(tasks, options, width));
+    std::string line;
+    while (std::getline(in, line)) {
+      std::string visible;
+      for (std::size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == '\033') {
+          i = line.find('m', i);
+          continue;
+        }
+        visible += line[i];
+      }
+      CHECK(display_width(visible) <= width - 1);
+    }
+  }
+}
+
 static void test_intervals() {
   CHECK(parse_watch_interval("1") == 1.0);
   CHECK(parse_watch_interval("0.25") == 0.25);
-  CHECK(parse_watch_interval("1e-2") == 0.01);
+  CHECK(parse_watch_interval("0.1") == 0.1);
+  CHECK(parse_watch_interval("1e-1") == 0.1);
+  // Below 0.1 s a poll can outlast the interval and spin a core.
   for (const auto* value : {"", "0", "-1", "no", "1x", "nan", "inf",
-                             "1e999", " 1", "1 "}) {
+                             "1e999", " 1", "1 ", "0.05", "1e-9"}) {
     CHECK(!parse_watch_interval(value));
   }
 }
@@ -130,5 +179,7 @@ int main() {
   test_changes();
   test_frames();
   test_intervals();
+  test_task_text_cannot_emit_controls();
+  test_tty_frames_leave_last_column_free();
   std::cout << "watch tests passed\n";
 }

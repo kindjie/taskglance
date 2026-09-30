@@ -98,7 +98,7 @@ taskglance watch --interval 0.5 --all
 ```
 
 Watch is read-only. It polls file contents every second by default;
-`--interval` accepts positive fractional seconds. Active tasks appear oldest
+`--interval` accepts fractional seconds down to 0.1. Active tasks appear oldest
 first, with completed tasks following when `--all` is set. Added or edited
 tasks and status changes appear bold for 10 seconds. The header shows the
 active count and the local time of the last observed change, initially the

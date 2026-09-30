@@ -93,6 +93,13 @@ if(TASKGLANCE_BUILD_TESTS)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/watch_arguments.cmake
   )
   set_tests_properties(taskglance_watch_arguments PROPERTIES TIMEOUT 25)
+  add_test(NAME taskglance_watch_live
+    COMMAND ${CMAKE_COMMAND}
+            -DTASKGLANCE=$<TARGET_FILE:taskglance>
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/watch-live
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/watch_live.cmake
+  )
+  set_tests_properties(taskglance_watch_live PROPERTIES TIMEOUT 20)
   add_test(NAME taskglance_concurrent_cli
     COMMAND ${CMAKE_COMMAND}
             -DTASKGLANCE=$<TARGET_FILE:taskglance>

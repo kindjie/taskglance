@@ -5,11 +5,72 @@
 #include <cmath>
 #include <ctime>
 #include <sstream>
+#include <unordered_map>
 
 #include "taskglance/render.hpp"
 #include "taskglance/util.hpp"
 
 namespace taskglance {
+namespace {
+
+std::size_t utf8_length(unsigned char lead) {
+  if (lead >= 0xc2 && lead <= 0xdf) return 2;
+  if (lead >= 0xe0 && lead <= 0xef) return 3;
+  if (lead >= 0xf0 && lead <= 0xf4) return 4;
+  return 0;
+}
+
+// Returns the code point of a well-formed UTF-8 sequence at offset, or
+// nothing if it is malformed, overlong, a surrogate, or out of range.
+std::optional<char32_t> decode_utf8(const std::string& text,
+                                    std::size_t offset, std::size_t length) {
+  if (length == 0 || offset + length > text.size()) {
+    return std::nullopt;
+  }
+  auto lead = static_cast<unsigned char>(text[offset]);
+  char32_t value = lead & (0x7f >> length);
+  for (std::size_t i = 1; i < length; ++i) {
+    auto next = static_cast<unsigned char>(text[offset + i]);
+    if ((next & 0xc0) != 0x80) {
+      return std::nullopt;
+    }
+    value = (value << 6) | (next & 0x3f);
+  }
+  static constexpr char32_t minimum[] = {0, 0, 0x80, 0x800, 0x10000};
+  if (value < minimum[length] || value > 0x10ffff ||
+      (value >= 0xd800 && value <= 0xdfff)) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+// Task text comes from any process that can write the task file. Keep
+// well-formed printable UTF-8 and replace everything a terminal could act
+// on (C0, DEL, C1 in raw or encoded form, malformed bytes) with '?'.
+std::string terminal_safe(const std::string& text) {
+  std::string output;
+  for (std::size_t i = 0; i < text.size();) {
+    auto byte = static_cast<unsigned char>(text[i]);
+    if (byte < 0x80) {
+      output.push_back(byte >= 0x20 && byte != 0x7f ? text[i] : '?');
+      ++i;
+      continue;
+    }
+    auto length = utf8_length(byte);
+    auto value = decode_utf8(text, i, length);
+    if (!value || (*value >= 0x80 && *value <= 0x9f)) {
+      output.push_back('?');
+      ++i;
+      continue;
+    }
+    output.append(text, i, length);
+    i += length;
+  }
+  return output;
+}
+
+}  // namespace
+
 
 std::string format_local_clock(std::chrono::system_clock::time_point time) {
   auto seconds = std::chrono::system_clock::to_time_t(time);
@@ -29,7 +90,7 @@ std::optional<double> parse_watch_interval(const std::string& value) {
   auto [end, error] = std::from_chars(value.data(),
                                      value.data() + value.size(), seconds);
   if (error != std::errc{} || end != value.data() + value.size() ||
-      !std::isfinite(seconds) || seconds <= 0) {
+      !std::isfinite(seconds) || seconds < 0.1) {
     return std::nullopt;
   }
   return seconds;
@@ -38,20 +99,26 @@ std::optional<double> parse_watch_interval(const std::string& value) {
 TaskChanges detect_task_changes(const std::vector<Task>& tasks,
                                 const std::vector<Task>& previous) {
   TaskChanges changes;
+  std::unordered_map<std::string, const Task*> before;
+  for (const auto& task : previous) {
+    before.emplace(task.id, &task);
+  }
   for (const auto& task : tasks) {
-    auto old = std::find_if(previous.begin(), previous.end(),
-                            [&](const auto& item) {
-      return item.id == task.id;
-    });
-    if (old == previous.end() || old->text != task.text ||
-        old->status != task.status) {
+    auto old = before.find(task.id);
+    if (old == before.end()) {
+      changes.changed_ids.push_back(task.id);
+      continue;
+    }
+    if (old->second->text != task.text ||
+        old->second->status != task.status) {
       changes.changed_ids.push_back(task.id);
     }
+    before.erase(old);
   }
+  // Whatever was not matched above no longer exists; report it in the
+  // previous order.
   for (const auto& task : previous) {
-    if (std::none_of(tasks.begin(), tasks.end(), [&](const auto& item) {
-      return item.id == task.id;
-    })) {
+    if (before.count(task.id) != 0) {
       changes.deleted_ids.push_back(task.id);
     }
   }
@@ -68,6 +135,12 @@ std::string build_watch_frame(
 ) {
   if (width <= 0 || height <= 0) {
     return "";
+  }
+  // Writing a terminal's final column leaves the cursor pending a wrap, so
+  // the line erase that follows would delete that cell, and Windows
+  // consoles wrap at once. Leave the column free.
+  if (options.tty && width > 1) {
+    --width;
   }
   auto visible = options.all ? tasks : active_tasks(tasks);
   std::stable_sort(visible.begin(), visible.end(), [](const auto& a,
@@ -95,7 +168,7 @@ std::string build_watch_frame(
     // Stored/imported data can contain controls; only our styles may emit
     // escape sequences, and truncation must happen before styling.
     auto line = truncate_display(
-      sanitize_task_text(task_label(task, id_width)), width
+      terminal_safe(sanitize_task_text(task_label(task, id_width))), width
     );
     line = color_task_ids(line, colors);
     if (options.tty) {
