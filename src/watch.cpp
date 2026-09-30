@@ -3,13 +3,26 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
-#include <iomanip>
+#include <ctime>
 #include <sstream>
 
 #include "taskglance/render.hpp"
 #include "taskglance/util.hpp"
 
 namespace taskglance {
+
+std::string format_local_clock(std::chrono::system_clock::time_point time) {
+  auto seconds = std::chrono::system_clock::to_time_t(time);
+  std::tm local {};
+#ifdef _WIN32
+  localtime_s(&local, &seconds);
+#else
+  localtime_r(&seconds, &local);
+#endif
+  char buffer[16];
+  std::strftime(buffer, sizeof(buffer), "%H:%M:%S", &local);
+  return buffer;
+}
 
 std::optional<double> parse_watch_interval(const std::string& value) {
   double seconds = 0;
@@ -64,16 +77,9 @@ std::string build_watch_frame(
     }
     return a.created_at < b.created_at;
   });
-  auto day = std::chrono::floor<std::chrono::days>(last_change);
-  auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
-    last_change - day
-  ).count();
   std::ostringstream header;
   header << "taskglance | " << active_tasks(tasks).size()
-         << " active | changed " << std::setfill('0')
-         << std::setw(2) << seconds / 3600 << ':'
-         << std::setw(2) << (seconds / 60) % 60 << ':'
-         << std::setw(2) << seconds % 60 << " UTC";
+         << " active | changed " << format_local_clock(last_change);
   std::string frame = truncate_display(header.str(), width);
   auto slots = static_cast<std::size_t>(height - 1);
   bool overflow = visible.size() > slots;

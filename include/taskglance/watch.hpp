@@ -21,6 +21,8 @@ struct WatchOptions {
   bool color = true;
 };
 
+// Formats time as HH:MM:SS in the local time zone.
+std::string format_local_clock(std::chrono::system_clock::time_point time);
 std::optional<double> parse_watch_interval(const std::string& value);
 TaskChanges detect_task_changes(const std::vector<Task>& tasks,
                                 const std::vector<Task>& previous);

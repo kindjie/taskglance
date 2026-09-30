@@ -226,13 +226,16 @@ int run_watch(const std::filesystem::path& file, double interval,
         Seconds(now - changed_at), options
       );
       if (options.tty) {
-        std::cout << "\033[H\033[2J";
+        // Overwrite in place and erase leftovers rather than clearing the
+        // screen first, which flickers in tmux.
+        std::cout << "\033[H";
         for (char ch : frame) {
           if (ch == '\n') {
-            std::cout << '\r';
+            std::cout << "\033[K\r";
           }
           std::cout << ch;
         }
+        std::cout << "\033[K\033[J";
       } else {
         if (!first) {
           std::cout << '\n';

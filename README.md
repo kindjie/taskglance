@@ -101,7 +101,7 @@ Watch is read-only. It polls file contents every second by default;
 `--interval` accepts positive fractional seconds. Active tasks appear oldest
 first, with completed tasks following when `--all` is set. Added or edited
 tasks and status changes appear bold for 10 seconds. The header shows the
-active count and the time (UTC) of the last observed change, initially the
+active count and the local time of the last observed change, initially the
 start time. Long lines are truncated and tasks beyond the pane's height are
 summarized as `+N more`.
 

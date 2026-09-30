@@ -59,7 +59,11 @@ static void test_frames() {
                           task("cd3333", "Finished", 0)};
   tasks[2].status = TaskStatus::Done;
   auto plain = frame(tasks);
-  CHECK(plain.find("taskglance | 2 active | changed 01:01:01 UTC") == 0);
+  auto clock = format_local_clock(std::chrono::system_clock::time_point{
+    3661s
+  });
+  CHECK(clock.size() == 8 && clock[2] == ':' && clock[5] == ':');
+  CHECK(plain.find("taskglance | 2 active | changed " + clock) == 0);
   CHECK(plain.find("[ab1] Oldest") < plain.find("[ab2] Newer"));
   CHECK(plain.find("Finished") == std::string::npos);
   CHECK(plain.find('\033') == std::string::npos);
