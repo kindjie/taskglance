@@ -104,6 +104,27 @@ static void test_normal_keys() {
         ActionType::Quit);
 }
 
+static void test_help_quit_sequence() {
+  InteractiveState state;
+  CHECK(key(state, "?").type == ActionType::None);
+  CHECK(state.mode == InteractiveMode::Help);
+  CHECK(key(state, "Z").type == ActionType::None);
+  CHECK(state.pending == "Z");
+  CHECK(key(state, "Z").type == ActionType::Quit);
+
+  state = {};
+  key(state, "?");
+  key(state, "Z");
+  key(state, "!");
+  CHECK(state.pending.empty());
+  CHECK(key(state, "Z").type == ActionType::None);
+  special(state, KeyType::Escape);
+  CHECK(state.mode == InteractiveMode::Normal && state.pending.empty());
+  CHECK(key(state, "Z").type == ActionType::None);
+  key(state, "?");
+  CHECK(key(state, "q").type == ActionType::Quit);
+}
+
 static void test_selection_and_filter() {
   std::vector<Task> tasks;
   for (int i = 0; i < 10; ++i) {
@@ -423,6 +444,7 @@ static void test_interactive_frames() {
 
 int main() {
   test_normal_keys();
+  test_help_quit_sequence();
   test_selection_and_filter();
   test_editor();
   test_decoder();

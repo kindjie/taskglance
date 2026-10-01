@@ -342,9 +342,12 @@ InteractiveAction handle_interactive_key(InteractiveState& state,
   }
   auto text = key.type == KeyType::Text ? key.text : "";
   if (state.mode == InteractiveMode::Help) {
-    if (text == "q") return {ActionType::Quit, {}, {}};
+    auto sequence = std::exchange(state.pending, "") + text;
+    if (text == "q" || sequence == "ZZ") return {ActionType::Quit, {}, {}};
     if (text == "?" || key.type == KeyType::Escape) {
       state.mode = InteractiveMode::Normal;
+    } else if (text == "Z") {
+      state.pending = text;
     }
     return {};
   }
