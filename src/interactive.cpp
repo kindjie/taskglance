@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
+#include <locale>
+#include <stdexcept>
 #include <utility>
 
 #include "taskglance/util.hpp"
@@ -28,6 +31,46 @@ std::size_t next_character(const std::string& text, std::size_t cursor) {
     ++cursor;
   }
   return cursor;
+}
+
+std::string lowercase_filter(const std::string& text) {
+  static const std::locale locale = [] {
+    try {
+      return std::locale("");
+    } catch (const std::runtime_error&) {
+      return std::locale::classic();
+    }
+  }();
+  const auto& casing = std::use_facet<std::ctype<wchar_t>>(locale);
+  auto safe = terminal_safe_text(text);
+  std::string output;
+  for (std::size_t i = 0; i < safe.size();) {
+    auto end = next_character(safe, i);
+    auto length = end - i;
+    auto lead = static_cast<unsigned char>(safe[i]);
+    char32_t value = length == 1 ? lead : lead & (0x7f >> length);
+    for (auto j = i + 1; j < end; ++j) {
+      value = (value << 6) | (static_cast<unsigned char>(safe[j]) & 0x3f);
+    }
+    if (value <= static_cast<char32_t>(
+                   std::numeric_limits<wchar_t>::max())) {
+      value = static_cast<char32_t>(casing.tolower(
+        static_cast<wchar_t>(value)));
+    }
+    if (value < 0x80) {
+      output += static_cast<char>(value);
+    } else {
+      static constexpr unsigned char leads[] = {0, 0, 0xc0, 0xe0, 0xf0};
+      int count = value < 0x800 ? 2 : (value < 0x10000 ? 3 : 4);
+      output += static_cast<char>(leads[count] |
+                                    (value >> (6 * (count - 1))));
+      for (int shift = 6 * (count - 2); shift >= 0; shift -= 6) {
+        output += static_cast<char>(0x80 | ((value >> shift) & 0x3f));
+      }
+    }
+    i = end;
+  }
+  return output;
 }
 
 Key control_key(unsigned char byte) {
@@ -236,12 +279,13 @@ EditorResult edit_line(LineEditor& editor, const Key& key) {
 
 void reload_interactive(InteractiveState& state,
                         const std::vector<Task>& tasks, bool all) {
-  auto filter = to_lower(state.mode == InteractiveMode::Filter
-                           ? state.editor.text : state.filter);
+  auto filter = lowercase_filter(state.mode == InteractiveMode::Filter
+                                   ? state.editor.text : state.filter);
   state.visible.clear();
   for (const auto& task : tasks) {
     if ((all || task.status == TaskStatus::Active) &&
-        to_lower(task.text).find(filter) != std::string::npos) {
+        (filter.empty() ||
+         lowercase_filter(task.text).find(filter) != std::string::npos)) {
       state.visible.push_back(task);
     }
   }

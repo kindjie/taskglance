@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <cstdlib>
-#include <iostream>
 #include <filesystem>
+#include <iostream>
+#include <locale>
 #include <sstream>
+#include <stdexcept>
 
 #include "taskglance/interactive.hpp"
 #include "taskglance/util.hpp"
@@ -145,6 +147,18 @@ static void test_selection_and_filter() {
   reload_interactive(state, {}, true);
   scroll_interactive(state, 0);
   CHECK(state.first_row == 0);
+  // Match non-ASCII case pairs when the terminal locale supports them.
+  try {
+    std::locale locale("");
+    if (std::use_facet<std::ctype<wchar_t>>(locale).tolower(L'\u00c9') ==
+        L'\u00e9') {
+      state.filter = "CAF\xc3\x89";
+      reload_interactive(state, {task("unicode", "caf\xc3\xa9")}, true);
+      CHECK(state.visible.size() == 1);
+    }
+  } catch (const std::runtime_error&) {
+    // A missing system locale still permits ASCII filtering.
+  }
 }
 
 static void test_editor() {
@@ -262,12 +276,14 @@ static void test_changes_and_undo() {
   CHECK(tasks.front().status == TaskStatus::Active);
   change = apply_interactive_action(tasks, {ActionType::Edit, "aa", "Edit"});
   tasks.front().text = "External edit";
-  result = apply_interactive_action(tasks, {ActionType::Undo, {}, {}}, change.undo);
+  result = apply_interactive_action(tasks, {ActionType::Undo, {}, {}},
+                                     change.undo);
   CHECK(!result.changed && result.message.find("changed") !=
         std::string::npos);
   CHECK(tasks.front().text == "External edit");
   tasks.erase(tasks.begin());
-  result = apply_interactive_action(tasks, {ActionType::Undo, {}, {}}, change.undo);
+  result = apply_interactive_action(tasks, {ActionType::Undo, {}, {}},
+                                     change.undo);
   CHECK(!result.changed && result.message.find("vanished") !=
         std::string::npos);
   for (auto type : {ActionType::Edit, ActionType::Toggle, ActionType::Delete}) {
@@ -276,7 +292,8 @@ static void test_changes_and_undo() {
           std::string::npos);
   }
   // Exact id, never an abbreviated prefix.
-  CHECK(!apply_interactive_action(tasks, {ActionType::Delete, "a", {}}).changed);
+  CHECK(!apply_interactive_action(tasks,
+                                  {ActionType::Delete, "a", {}}).changed);
   change = apply_interactive_action(tasks, {ActionType::Delete, "ab", {}});
   tasks.push_back(task("ab", "Reused id"));
   CHECK(!apply_interactive_action(tasks, {ActionType::Undo, {}, {}},
