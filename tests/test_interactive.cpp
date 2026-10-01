@@ -534,6 +534,15 @@ static void test_wrapped_frames() {
   reload_interactive(state, tasks, true);
   for (int width : {1, 2, 3, 4, 6, 8, 10, 15, 60}) {
     for (const auto& line : row_lines(unstyled(render(width).text))) {
+      if (display_width(line) > width - 1) {
+        std::cerr << "width " << width << " measured "
+                  << display_width(line) << " bytes " << line.size()
+                  << " line:";
+        for (unsigned char ch : line) {
+          std::cerr << ' ' << std::hex << static_cast<int>(ch) << std::dec;
+        }
+        std::cerr << '\n';
+      }
       CHECK(display_width(line) <= width - 1);
       CHECK(terminal_safe_text(line) == line);
     }
