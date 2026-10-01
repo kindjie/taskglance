@@ -279,8 +279,60 @@ int run_watch(const std::filesystem::path& file, double interval,
       redraw = true;
     }
   };
+  auto render_frame = [&]() {
+    auto now = Clock::now();
+    std::string frame;
+    std::optional<int> cursor;
+    if (options.interactive) {
+      taskglance::scroll_interactive(interactive, page_rows());
+      auto rendered = taskglance::build_interactive_frame(
+        tasks, interactive, changed_ids, size.width, size.height,
+        last_change, Seconds(now - changed_at), options.color
+      );
+      frame = std::move(rendered.text);
+      cursor = rendered.cursor_column;
+    } else {
+      frame = taskglance::build_watch_frame(
+        tasks, changed_ids, size.width, size.height, last_change,
+        Seconds(now - changed_at), options
+      );
+    }
+    if (options.tty) {
+      // Overwrite in place and erase leftovers rather than clearing the
+      // screen first, which flickers in tmux.
+      std::cout << "\033[H";
+      for (char ch : frame) {
+        if (ch == '\n') {
+          std::cout << "\033[K\r";
+        }
+        std::cout << ch;
+      }
+      std::cout << "\033[K\033[J";
+      if (options.interactive) {
+        if (cursor) {
+          std::cout << "\033[" << size.height << ';' << *cursor
+                    << "H\033[?25h";
+        } else {
+          std::cout << "\033[?25l";
+        }
+      }
+    } else {
+      if (!first) {
+        std::cout << '\n';
+      }
+      std::cout << frame << '\n';
+    }
+    std::cout.flush();
+    if (!std::cout) {
+      return false;
+    }
+    first = false;
+    redraw = false;
+    return true;
+  };
   auto handle_keys = [&](const std::vector<taskglance::Key>& keys) {
-    for (const auto& key : keys) {
+    for (std::size_t index = 0; index < keys.size(); ++index) {
+      const auto& key = keys[index];
       if (stopped) break;
       auto action = taskglance::handle_interactive_key(interactive, key,
                                                        page_rows());
@@ -294,11 +346,78 @@ int run_watch(const std::filesystem::path& file, double interval,
           taskglance::ChangeResult result;
           auto last = undo.empty() ? std::optional<taskglance::UndoChange>{}
                                      : undo.back();
-          taskglance::update_tasks(file, [&](auto& current) {
+          auto waiting_at = Clock::now();
+          bool waiting_shown = false;
+          bool pending_z = false;
+          auto check_quit = [&](const taskglance::Key& waiting_key) {
+            auto text = waiting_key.type == taskglance::KeyType::Text
+                          ? waiting_key.text : "";
+            if (waiting_key.type == taskglance::KeyType::CtrlC ||
+                text == "q" || (pending_z && text == "Z")) {
+              stopped = 1;
+            }
+            pending_z = text == "Z";
+          };
+          // Quit input already decoded after this action must also prevent
+          // a write, even if it arrived in the same read as the action.
+          for (auto next = index + 1; next < keys.size(); ++next) {
+            check_quit(keys[next]);
+          }
+          auto cancel = [&]() {
+            if (stopped) return true;
+#ifndef _WIN32
+            struct pollfd descriptor {STDIN_FILENO, POLLIN, 0};
+            int ready = ::poll(&descriptor, 1, 0);
+            if (ready < 0 && errno != EINTR) {
+              throw std::runtime_error("Could not poll interactive input");
+            }
+            if (ready > 0 && (descriptor.revents & POLLIN)) {
+              char bytes[256];
+              auto count = ::read(STDIN_FILENO, bytes, sizeof(bytes));
+              if (count > 0) {
+                // While a write waits, accept quit keys only: do not start
+                // another mutation or change the undo history.
+                for (const auto& waiting_key : decoder.feed(std::string_view(
+                       bytes, static_cast<std::size_t>(count)))) {
+                  check_quit(waiting_key);
+                }
+                escape_at = Clock::now();
+              } else if (count == 0) {
+                stopped = 1;
+              } else if (errno != EINTR && errno != EAGAIN) {
+                throw std::runtime_error("Could not read interactive input");
+              }
+            }
+            if (ready > 0 &&
+                (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL))) {
+              stopped = 1;
+            }
+            if (decoder.pending_escape() &&
+                Clock::now() - escape_at >= std::chrono::milliseconds(25)) {
+              for (const auto& waiting_key : decoder.expire_escape()) {
+                check_quit(waiting_key);
+              }
+            }
+#endif
+            if (stopped) return true;
+            if (!waiting_shown && Clock::now() - waiting_at >=
+                                    std::chrono::milliseconds(200)) {
+              interactive.message = "waiting for the task file lock…";
+              size = terminal_size(options.tty);
+              if (!render_frame()) {
+                throw std::runtime_error("Could not render lock wait");
+              }
+              waiting_shown = true;
+            }
+            return stopped != 0;
+          };
+          bool completed = taskglance::update_tasks(file, [&](auto& current) {
             result = taskglance::apply_interactive_action(current, action,
                                                            last);
             return result.changed;
-          });
+          }, cancel);
+          if (!completed) break;
+          redraw = true;
           interactive.message = result.message;
           if (result.changed) {
             if (action.type == taskglance::ActionType::Undo) {
@@ -312,6 +431,7 @@ int run_watch(const std::filesystem::path& file, double interval,
           }
           reload();
         } catch (const std::exception& error) {
+          redraw = true;
           interactive.message = std::string("Change failed: ") + error.what();
         }
       }
@@ -339,55 +459,7 @@ int run_watch(const std::filesystem::path& file, double interval,
         redraw = true;
       }
     }
-    if (redraw) {
-      std::string frame;
-      std::optional<int> cursor;
-      if (options.interactive) {
-        taskglance::scroll_interactive(interactive, page_rows());
-        auto rendered = taskglance::build_interactive_frame(
-          tasks, interactive, changed_ids, size.width, size.height,
-          last_change, Seconds(now - changed_at), options.color
-        );
-        frame = std::move(rendered.text);
-        cursor = rendered.cursor_column;
-      } else {
-        frame = taskglance::build_watch_frame(
-          tasks, changed_ids, size.width, size.height, last_change,
-          Seconds(now - changed_at), options
-        );
-      }
-      if (options.tty) {
-        // Overwrite in place and erase leftovers rather than clearing the
-        // screen first, which flickers in tmux.
-        std::cout << "\033[H";
-        for (char ch : frame) {
-          if (ch == '\n') {
-            std::cout << "\033[K\r";
-          }
-          std::cout << ch;
-        }
-        std::cout << "\033[K\033[J";
-        if (options.interactive) {
-          if (cursor) {
-            std::cout << "\033[" << size.height << ';' << *cursor
-                      << "H\033[?25h";
-          } else {
-            std::cout << "\033[?25l";
-          }
-        }
-      } else {
-        if (!first) {
-          std::cout << '\n';
-        }
-        std::cout << frame << '\n';
-      }
-      std::cout.flush();
-      if (!std::cout) {
-        return 1;
-      }
-      first = false;
-      redraw = false;
-    }
+    if (redraw && !render_frame()) return 1;
     // Bound signal/resize latency independently of the requested file poll.
     double delay = std::min(0.05, std::max(0.0, interval -
                                       Seconds(Clock::now() - polled_at)

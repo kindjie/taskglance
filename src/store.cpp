@@ -215,13 +215,24 @@ void update_tasks(
   const std::filesystem::path& file,
   const std::function<bool(std::vector<Task>&)>& change
 ) {
+  update_tasks(file, change, {});
+}
+
+bool update_tasks(
+  const std::filesystem::path& file,
+  const std::function<bool(std::vector<Task>&)>& change,
+  const std::function<bool()>& cancel
+) {
   auto lock_file = file;
   lock_file += ".lock";
-  FileLock lock(lock_file);
+  FileLock lock(lock_file, cancel);
+  if (!lock.acquired()) return false;
   auto tasks = load_tasks(file);
+  if (cancel && cancel()) return false;
   if (change(tasks)) {
     save_tasks(file, tasks);
   }
+  return true;
 }
 
 Task make_task(const std::string& text, const std::vector<Task>& existing) {
