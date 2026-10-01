@@ -38,8 +38,19 @@ void update_tasks(
   const std::function<bool(std::vector<Task>&)>& change
 );
 
+// Returns false if cancelled before change runs; true means change ran,
+// even if it declined to save. Empty cancel preserves blocking acquisition.
+// Cancellation is checked while waiting and immediately before change.
+bool update_tasks(
+  const std::filesystem::path& file,
+  const std::function<bool(std::vector<Task>&)>& change,
+  const std::function<bool()>& cancel
+);
+
 Task make_task(const std::string& text,
-               const std::vector<Task>& existing_tasks);
+               const std::vector<Task>& existing_tasks,
+               std::chrono::system_clock::time_point created_at =
+                 std::chrono::system_clock::now());
 std::vector<Task> active_tasks(const std::vector<Task>& tasks);
 
 std::optional<std::size_t> find_task_by_prefix(

@@ -12,6 +12,7 @@
 #include <locale>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -275,8 +276,11 @@ void atomic_write_file(const std::filesystem::path& file,
   durable_rename(temp, file);
 }
 
+FileLock::FileLock(const std::filesystem::path& path) : FileLock(path, {}) {}
+
 #ifdef _WIN32
-FileLock::FileLock(const std::filesystem::path& path) {
+FileLock::FileLock(const std::filesystem::path& path,
+                   const std::function<bool()>& cancel) {
   ensure_parent_dir(path);
   handle_ = ::CreateFileW(
     path.c_str(), GENERIC_READ | GENERIC_WRITE,
@@ -286,11 +290,23 @@ FileLock::FileLock(const std::filesystem::path& path) {
   if (handle_ == INVALID_HANDLE_VALUE) {
     throw std::runtime_error("Could not open lock " + path.string());
   }
-  OVERLAPPED overlapped {};
-  if (!::LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD,
-                    &overlapped)) {
+  try {
+    OVERLAPPED overlapped {};
+    auto flags = LOCKFILE_EXCLUSIVE_LOCK |
+                 (cancel ? LOCKFILE_FAIL_IMMEDIATELY : 0);
+    while (!cancel || !cancel()) {
+      if (::LockFileEx(handle_, flags, 0, MAXDWORD, MAXDWORD, &overlapped)) {
+        acquired_ = true;
+        break;
+      }
+      if (!cancel || ::GetLastError() != ERROR_LOCK_VIOLATION) {
+        throw std::runtime_error("Could not lock " + path.string());
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    }
+  } catch (...) {
     ::CloseHandle(handle_);
-    throw std::runtime_error("Could not lock " + path.string());
+    throw;
   }
 }
 
@@ -299,20 +315,34 @@ FileLock::~FileLock() {
   ::CloseHandle(handle_);
 }
 #else
-FileLock::FileLock(const std::filesystem::path& path) {
+FileLock::FileLock(const std::filesystem::path& path,
+                   const std::function<bool()>& cancel) {
   ensure_parent_dir(path);
   fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
   if (fd_ < 0) {
     throw std::runtime_error("Could not open lock " + path.string() + ": " +
                              std::strerror(errno));
   }
-  while (::flock(fd_, LOCK_EX) != 0) {
-    if (errno != EINTR) {
+  try {
+    auto flags = LOCK_EX | (cancel ? LOCK_NB : 0);
+    while (!cancel || !cancel()) {
+      if (::flock(fd_, flags) == 0) {
+        acquired_ = true;
+        break;
+      }
       auto error = errno;
-      ::close(fd_);
-      throw std::runtime_error("Could not lock " + path.string() + ": " +
-                               std::strerror(error));
+      if (error != EINTR &&
+          !(cancel && (error == EWOULDBLOCK || error == EAGAIN))) {
+        throw std::runtime_error("Could not lock " + path.string() + ": " +
+                                 std::strerror(error));
+      }
+      if (cancel) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+      }
     }
+  } catch (...) {
+    ::close(fd_);
+    throw;
   }
 }
 

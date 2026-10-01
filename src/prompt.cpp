@@ -177,6 +177,8 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "    _arguments -s \\\n";
     out << "      '1:command:(watch)' \\\n";
     out << "      '--all[Include done tasks]' \\\n";
+    out << "      '(-i)--interactive[Enable vim-key interactive mode]' \\\n";
+    out << "      '(--interactive)-i[Enable vim-key interactive mode]' \\\n";
     out << "      '--interval[Polling interval in seconds]:seconds:'\n";
     out << "    return\n";
     out << "  fi\n";
@@ -227,7 +229,8 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "  if (( COMP_CWORD > 1 )); then\n";
     out << "    if [[ ${COMP_WORDS[1]} = watch &&\n";
     out << "          ${COMP_WORDS[COMP_CWORD-1]} != --interval ]]; then\n";
-    out << "      COMPREPLY=($(compgen -W '--all --interval' -- "
+    out << "      COMPREPLY=($(compgen -W "
+           "'--all --interval --interactive -i' -- "
            "\"$current\"))\n";
     out << "    else\n";
     out << "      COMPREPLY=()\n";
@@ -250,6 +253,9 @@ std::string completion_script(const std::string& shell, bool alias_tg) {
     out << "complete -c " << command
         << " -f -n '__fish_seen_subcommand_from watch' "
            "-l interval -r -d 'Polling interval in seconds'\n";
+    out << "complete -c " << command
+        << " -f -n '__fish_seen_subcommand_from watch' "
+           "-l interactive -s i -d 'Enable vim-key interactive mode'\n";
   } else {
     out << "Unsupported shell: " << shell << '\n';
   }

@@ -1,7 +1,11 @@
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -78,6 +82,20 @@ static void test_task_persistence() {
   CHECK(parse_tasks("").empty());
 }
 
+static void test_task_ids_differ_across_lifetimes() {
+  const std::vector<Task> existing;
+  auto created_at = time_from_iso("1234567890");
+  auto first = make_task("Identical", existing, created_at);
+  auto replacement = make_task("Identical", existing, created_at);
+  CHECK(first.text == replacement.text);
+  CHECK(first.created_at == replacement.created_at);
+  CHECK(first.id != replacement.id);
+  for (const auto& id : {first.id, replacement.id}) {
+    CHECK(id.size() == 6);
+    CHECK(id.find_first_not_of("0123456789abcdef") == std::string::npos);
+  }
+}
+
 static void test_concurrent_updates_keep_every_change() {
   auto root = temp_root();
   auto file = root / "tasks.tsv";
@@ -104,6 +122,86 @@ static void test_concurrent_updates_keep_every_change() {
   }
 
   CHECK(load_tasks(file).size() == kWriters * kAddsPerWriter);
+}
+
+static void test_cancellable_lock_updates() {
+  using Clock = std::chrono::steady_clock;
+  using namespace std::chrono_literals;
+  auto file = temp_root() / "tasks.tsv";
+  update_tasks(file, [](auto& tasks) {
+    tasks.push_back(make_task("Keep me", tasks));
+    return true;
+  });
+  auto before = read_task_file(file);
+  auto held = std::make_unique<FileLock>(file.string() + ".lock");
+  bool called = false;
+  auto start = Clock::now();
+  int polls = 0;
+  CHECK(!update_tasks(file, [&](auto& tasks) {
+    called = true;
+    tasks.clear();
+    return true;
+  }, [&] {
+    ++polls;
+    return Clock::now() - start >= 60ms;
+  }));
+  CHECK(Clock::now() - start < 1s);
+  CHECK(polls > 1);
+  CHECK(!called);
+  CHECK(read_task_file(file) == before);
+  {
+    FileLock cancelled(file.string() + ".lock", [] { return true; });
+    CHECK(!cancelled.acquired());
+  }
+
+  // Releasing a contended lock allows exactly one change to proceed.
+  std::atomic<int> attempts{0};
+  bool completed = false;
+  std::thread writer([&] {
+    auto deadline = Clock::now() + 2s;
+    completed = update_tasks(file, [&](auto& tasks) {
+      called = true;
+      tasks.push_back(make_task("After release", tasks));
+      return true;
+    }, [&] {
+      ++attempts;
+      return Clock::now() >= deadline;
+    });
+  });
+  auto deadline = Clock::now() + 1s;
+  while (attempts < 3 && Clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  CHECK(attempts >= 3);
+  held.reset();
+  writer.join();
+  CHECK(completed && called);
+  CHECK(load_tasks(file).size() == 2);
+
+  // Cancellation is checked again after acquiring and loading, so a stop
+  // requested as the lock becomes available cannot run the change.
+  called = false;
+  polls = 0;
+  before = read_task_file(file);
+  CHECK(!update_tasks(file, [&](auto&) {
+    called = true;
+    return true;
+  }, [&] { return ++polls == 2; }));
+  CHECK(!called);
+  CHECK(read_task_file(file) == before);
+
+  // A throwing caller predicate must release its open lock handle.
+  bool threw = false;
+  try {
+    FileLock lock(file.string() + ".lock", []() -> bool {
+      throw std::runtime_error("cancel failed");
+    });
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  CHECK(threw);
+  FileLock lock(file.string() + ".lock", [] { return false; });
+  CHECK(lock.acquired());
 }
 
 static void test_declined_update_leaves_file_untouched() {
@@ -364,20 +462,28 @@ static void test_watch_completions_in_all_shells() {
     CHECK(completion.find("watch") != std::string::npos);
     CHECK(completion.find("interval") != std::string::npos);
     CHECK(completion.find("all") != std::string::npos);
+    CHECK(completion.find("interactive") != std::string::npos);
   }
   auto bash = completion_script("bash", true);
   CHECK(bash.find("_tg_complete") != std::string::npos);
   CHECK(bash.find("COMP_WORDS[COMP_CWORD]") != std::string::npos);
   CHECK(bash.find("COMP_WORDS[COMP_CWORD-1]") != std::string::npos);
+  CHECK(bash.find("--interactive -i") != std::string::npos);
+  auto zsh = completion_script("zsh", false);
+  CHECK(zsh.find("(-i)--interactive") != std::string::npos);
+  CHECK(zsh.find("(--interactive)-i") != std::string::npos);
   auto fish = completion_script("fish", false);
   CHECK(fish.find("__fish_seen_subcommand_from watch") != std::string::npos);
   CHECK(fish.find("-l interval -r") != std::string::npos);
+  CHECK(fish.find("-l interactive -s i") != std::string::npos);
 }
 
 int main() {
   test_percent_encoding_round_trips();
   test_task_persistence();
+  test_task_ids_differ_across_lifetimes();
   test_concurrent_updates_keep_every_change();
+  test_cancellable_lock_updates();
   test_declined_update_leaves_file_untouched();
   test_done_lookup_ambiguity();
   test_render_compact_limits_tasks();

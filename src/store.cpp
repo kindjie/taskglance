@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 
@@ -85,7 +86,14 @@ std::string sanitize_task_text(const std::string& text) {
     output.replace(position, 2, " ");
   }
   if (output.size() > 500) {
-    output = output.substr(0, 497) + "...";
+    std::size_t end = 497;
+    // The byte limit must not split a printable UTF-8 character entered
+    // in the watch editor (or supplied by the CLI).
+    while (end > 0 &&
+           (static_cast<unsigned char>(output[end]) & 0xc0) == 0x80) {
+      --end;
+    }
+    output = output.substr(0, end) + "...";
   }
   return output;
 }
@@ -208,26 +216,45 @@ void update_tasks(
   const std::filesystem::path& file,
   const std::function<bool(std::vector<Task>&)>& change
 ) {
+  update_tasks(file, change, {});
+}
+
+bool update_tasks(
+  const std::filesystem::path& file,
+  const std::function<bool(std::vector<Task>&)>& change,
+  const std::function<bool()>& cancel
+) {
   auto lock_file = file;
   lock_file += ".lock";
-  FileLock lock(lock_file);
+  FileLock lock(lock_file, cancel);
+  if (!lock.acquired()) return false;
   auto tasks = load_tasks(file);
+  if (cancel && cancel()) return false;
   if (change(tasks)) {
     save_tasks(file, tasks);
   }
+  return true;
 }
 
-Task make_task(const std::string& text, const std::vector<Task>& existing) {
+Task make_task(const std::string& text, const std::vector<Task>& existing,
+               std::chrono::system_clock::time_point created_at) {
   Task task;
   task.status = TaskStatus::Active;
-  task.created_at = std::chrono::system_clock::now();
+  task.created_at = created_at;
   task.text = sanitize_task_text(text);
   if (task.text.empty()) {
     throw std::runtime_error("Task text cannot be empty");
   }
 
+  // Text, second-resolution time, and count can recur after deletion.
+  // Mix fresh entropy with a monotonic timestamp so replacement tasks do
+  // not deterministically inherit the identity an old undo entry targets.
+  std::random_device entropy;
+  auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
   auto seed = task.text + time_to_iso(task.created_at) +
-              std::to_string(existing.size());
+              std::to_string(existing.size()) + ":" + std::to_string(tick) +
+              ":" + std::to_string(entropy()) + ":" +
+              std::to_string(entropy());
   auto hash = fnv1a64(seed);
   task.id = hex_short(hash, 6);
   int salt = 0;

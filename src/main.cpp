@@ -26,7 +26,7 @@ std::string usage() {
 Usage:
   taskglance add <text>
   taskglance list
-  taskglance watch [--interval <seconds>] [--all]
+  taskglance watch [--interval <seconds>] [--all] [--interactive|-i]
   taskglance done <id-prefix>
   taskglance delete <id-prefix>
   taskglance edit <id-prefix> <text>
@@ -133,6 +133,8 @@ int run(int argc, char** argv) {
       std::string argument = argv[i];
       if (argument == "--all") {
         options.all = true;
+      } else if (argument == "--interactive" || argument == "-i") {
+        options.interactive = true;
       } else if (argument == "--interval") {
         auto parsed = i + 1 < argc
                         ? taskglance::parse_watch_interval(argv[++i])

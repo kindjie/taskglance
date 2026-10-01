@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -33,11 +34,17 @@ void atomic_write_file(const std::filesystem::path& file,
 class FileLock {
  public:
   explicit FileLock(const std::filesystem::path& path);
+  // Polls every 15 ms when cancel is supplied. Cancellation leaves
+  // acquired() false; exceptions from cancel propagate without leaking.
+  FileLock(const std::filesystem::path& path,
+           const std::function<bool()>& cancel);
+  bool acquired() const { return acquired_; }
   ~FileLock();
   FileLock(const FileLock&) = delete;
   FileLock& operator=(const FileLock&) = delete;
 
  private:
+  bool acquired_ = false;
 #ifdef _WIN32
   void* handle_;
 #else
