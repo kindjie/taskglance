@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 
@@ -235,17 +236,25 @@ bool update_tasks(
   return true;
 }
 
-Task make_task(const std::string& text, const std::vector<Task>& existing) {
+Task make_task(const std::string& text, const std::vector<Task>& existing,
+               std::chrono::system_clock::time_point created_at) {
   Task task;
   task.status = TaskStatus::Active;
-  task.created_at = std::chrono::system_clock::now();
+  task.created_at = created_at;
   task.text = sanitize_task_text(text);
   if (task.text.empty()) {
     throw std::runtime_error("Task text cannot be empty");
   }
 
+  // Text, second-resolution time, and count can recur after deletion.
+  // Mix fresh entropy with a monotonic timestamp so replacement tasks do
+  // not deterministically inherit the identity an old undo entry targets.
+  std::random_device entropy;
+  auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
   auto seed = task.text + time_to_iso(task.created_at) +
-              std::to_string(existing.size());
+              std::to_string(existing.size()) + ":" + std::to_string(tick) +
+              ":" + std::to_string(entropy()) + ":" +
+              std::to_string(entropy());
   auto hash = fnv1a64(seed);
   task.id = hex_short(hash, 6);
   int salt = 0;

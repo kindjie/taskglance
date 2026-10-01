@@ -82,6 +82,20 @@ static void test_task_persistence() {
   CHECK(parse_tasks("").empty());
 }
 
+static void test_task_ids_differ_across_lifetimes() {
+  const std::vector<Task> existing;
+  auto created_at = time_from_iso("1234567890");
+  auto first = make_task("Identical", existing, created_at);
+  auto replacement = make_task("Identical", existing, created_at);
+  CHECK(first.text == replacement.text);
+  CHECK(first.created_at == replacement.created_at);
+  CHECK(first.id != replacement.id);
+  for (const auto& id : {first.id, replacement.id}) {
+    CHECK(id.size() == 6);
+    CHECK(id.find_first_not_of("0123456789abcdef") == std::string::npos);
+  }
+}
+
 static void test_concurrent_updates_keep_every_change() {
   auto root = temp_root();
   auto file = root / "tasks.tsv";
@@ -467,6 +481,7 @@ static void test_watch_completions_in_all_shells() {
 int main() {
   test_percent_encoding_round_trips();
   test_task_persistence();
+  test_task_ids_differ_across_lifetimes();
   test_concurrent_updates_keep_every_change();
   test_cancellable_lock_updates();
   test_declined_update_leaves_file_untouched();

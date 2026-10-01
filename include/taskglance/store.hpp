@@ -48,7 +48,9 @@ bool update_tasks(
 );
 
 Task make_task(const std::string& text,
-               const std::vector<Task>& existing_tasks);
+               const std::vector<Task>& existing_tasks,
+               std::chrono::system_clock::time_point created_at =
+                 std::chrono::system_clock::now());
 std::vector<Task> active_tasks(const std::vector<Task>& tasks);
 
 std::optional<std::size_t> find_task_by_prefix(
