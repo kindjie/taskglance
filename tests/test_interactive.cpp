@@ -555,8 +555,20 @@ static void test_wrapping_and_layout() {
          std::vector<std::string>{"[aa] one two", "     three", "     four"}));
   CHECK((wrap_watch_row("[aa] ", "abcdefghijk", 10) ==
          std::vector<std::string>{"[aa] abcde", "     fghij", "     k"}));
-  CHECK((wrap_watch_row("[aa] ", "café 猫猫猫", 10) ==
-         std::vector<std::string>{"[aa] café", "     猫猫", "     猫"}));
+  // Every line fits and no character is lost, whatever width the platform
+  // gives wide characters (display_width counts each as 1 on Windows).
+  auto wide = wrap_watch_row("[aa] ", "café 猫猫猫", 10);
+  std::string rejoined;
+  for (const auto& line : wide) {
+    CHECK(display_width(line) <= 10);
+    rejoined += line.substr(5);
+  }
+  CHECK(wide.front().rfind("[aa] café", 0) == 0);
+  CHECK(rejoined == "café猫猫猫");
+#ifndef _WIN32
+  CHECK((wide == std::vector<std::string>{"[aa] café", "     猫猫",
+                                          "     猫"}));
+#endif
   CHECK((wrap_watch_row("[aa] ", "fits", 9) ==
          std::vector<std::string>{"[aa] fits"}));
   CHECK((wrap_watch_row("[abc] ", "one two three", 13) ==
