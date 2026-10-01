@@ -295,8 +295,13 @@ std::string build_watch_frame(
       if (lines.size() > layout.selected_lines) {
         lines.resize(layout.selected_lines);
         if (!lines.empty()) {
-          lines.back() = width > 0
-            ? clip_watch_text(lines.back(), width - 1) + "…" : "";
+          // Measure the ellipsis: it is three columns where the locale is
+          // not UTF-8 (each byte counts), so assuming one would overflow.
+          static const std::string ellipsis = "…";
+          auto room = width - display_width(ellipsis);
+          lines.back() = room >= 0
+            ? clip_watch_text(lines.back(), room) + ellipsis
+            : clip_watch_text(lines.back(), width);
         }
       }
     }
