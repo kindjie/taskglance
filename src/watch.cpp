@@ -44,7 +44,112 @@ std::optional<char32_t> decode_utf8(const std::string& text,
   return value;
 }
 
+// Clip terminal-safe UTF-8 without an ellipsis or a partial code point.
+std::string clip_watch_text(const std::string& text, int width) {
+  std::size_t end = 0;
+  int used = 0;
+  while (end < text.size()) {
+    auto length = std::max<std::size_t>(1, utf8_length(
+      static_cast<unsigned char>(text[end])));
+    auto columns = display_width(text.substr(end, length));
+    if (used + columns > width) break;
+    used += columns;
+    end += length;
+  }
+  return text.substr(0, end);
+}
+
+std::string truncate_watch_text(const std::string& text, int width) {
+  // truncate_display's tiny-width path slices bytes; avoid that for UTF-8.
+  return width <= 3 ? clip_watch_text(text, width)
+                    : truncate_display(text, width);
+}
+
+std::vector<std::string> selected_row_lines(const Task& task,
+                                           std::size_t id_width, int width) {
+  auto prefix = terminal_safe_text(
+    "[" + task.id.substr(0, id_width) + "] ");
+  auto text = terminal_safe_text(sanitize_task_text(task.text));
+  return wrap_watch_row(prefix, text, width);
+}
+
 }  // namespace
+
+std::vector<std::string> wrap_watch_row(const std::string& prefix,
+                                      const std::string& text, int width) {
+  auto label = prefix + text;
+  if (display_width(label) <= width) return {label};
+  int room = width - display_width(prefix);
+  if (room <= 0) return {truncate_watch_text(label, width)};
+  std::vector<std::string> lines;
+  auto indent = std::string(static_cast<std::size_t>(display_width(prefix)),
+                            ' ');
+  std::size_t start = 0;
+  while (start < text.size()) {
+    auto chunk = clip_watch_text(text.substr(start), room);
+    if (chunk.empty()) {
+      // Even a single wide character cannot fit beside the id column.
+      lines.push_back(truncate_watch_text(
+        (lines.empty() ? prefix : indent) + text.substr(start), width));
+      break;
+    }
+    auto end = start + chunk.size();
+    if (end < text.size() && text[end] != ' ') {
+      auto space = chunk.rfind(' ');
+      if (space != std::string::npos && space > 0) {
+        chunk.resize(space);
+        end = start + space;
+      }
+    }
+    lines.push_back((lines.empty() ? prefix : indent) + chunk);
+    start = end;
+    while (start < text.size() && text[start] == ' ') ++start;
+  }
+  return lines;
+}
+
+WatchRowLayout layout_watch_rows(std::size_t count, std::size_t selected,
+                                 std::size_t selected_height,
+                                 std::size_t first_row, std::size_t slots) {
+  if (count == 0 || slots == 0) return {};
+  selected = std::min(selected, count - 1);
+  selected_height = std::max<std::size_t>(1, selected_height);
+  // A summary must not displace any part of a row that needs the whole pane.
+  bool summary = slots > selected_height &&
+                 count > slots - selected_height + 1;
+  auto capacity = slots - (summary ? 1 : 0);
+  auto selected_lines = std::min(selected_height, capacity);
+  auto other_rows = capacity - selected_lines;
+  first_row = std::min(first_row, selected);
+  auto earliest = selected > other_rows ? selected - other_rows : 0;
+  first_row = std::max(first_row, earliest);
+  // Fill spare space above the selection when it is near the end.
+  auto available = count - first_row;
+  if (available < other_rows + 1) {
+    auto spare = other_rows + 1 - available;
+    first_row -= std::min(first_row, spare);
+  }
+  auto shown = std::min(count - first_row, other_rows + 1);
+  return {first_row, shown, selected_lines,
+          summary ? count - first_row - shown : 0};
+}
+
+WatchRowLayout layout_watch_viewport(const std::vector<Task>& tasks,
+                                     const WatchViewport& viewport,
+                                     int width, int height) {
+  if (width <= 0 || height <= 1 || viewport.tasks.empty()) return {};
+  auto selected = std::find_if(viewport.tasks.begin(), viewport.tasks.end(),
+    [&](const Task& task) { return task.id == viewport.selected_id; });
+  auto index = static_cast<std::size_t>(selected - viewport.tasks.begin());
+  if (selected == viewport.tasks.end()) {
+    index = std::min(viewport.first_row, viewport.tasks.size() - 1);
+  }
+  auto lines = selected == viewport.tasks.end() ? 1 : selected_row_lines(
+    *selected, unique_id_width(tasks, 2, true), width - 1).size();
+  return layout_watch_rows(viewport.tasks.size(), index, lines,
+                            viewport.first_row,
+                            static_cast<std::size_t>(height - 1));
+}
 
 // Task text comes from any process that can write the task file. Keep
 // well-formed printable UTF-8 and replace everything a terminal could act
@@ -136,10 +241,11 @@ std::string build_watch_frame(
   if (width <= 0 || height <= 0) {
     return "";
   }
+  auto terminal_width = width;
   // Writing a terminal's final column leaves the cursor pending a wrap, so
   // the line erase that follows would delete that cell, and Windows
   // consoles wrap at once. Leave the column free.
-  if (options.tty && width > 1) {
+  if (options.tty && (width > 1 || viewport)) {
     --width;
   }
   auto visible = viewport ? viewport->tasks
@@ -162,6 +268,16 @@ std::string build_watch_frame(
   auto remaining = visible.size() - start;
   bool summary = visible.size() > slots && slots > (viewport ? 1u : 0u);
   auto count = std::min(remaining, slots - (summary ? 1 : 0));
+  WatchRowLayout layout;
+  if (viewport) {
+    // The viewport is interactive; height already excludes its status row.
+    layout = layout_watch_viewport(tasks, *viewport,
+                                   terminal_width, height);
+    start = layout.first_row;
+    count = layout.count;
+    remaining = visible.size() - start;
+    summary = layout.more > 0;
+  }
   auto id_width = unique_id_width(tasks, 2, options.all);
   Config colors;
   colors.color = options.tty && options.color;
@@ -169,31 +285,44 @@ std::string build_watch_frame(
     const auto& task = visible[start + i];
     // Stored/imported data can contain controls; only our styles may emit
     // escape sequences, and truncation must happen before styling.
-    auto line = truncate_display(
-      terminal_safe_text(sanitize_task_text(task_label(task, id_width))), width
-    );
-    line = color_task_ids(line, colors);
-    if (options.tty) {
-      bool highlight = since_change.count() >= 0 &&
-                       since_change.count() < 10 &&
-                       std::find(changed_ids.begin(), changed_ids.end(),
-                                  task.id) != changed_ids.end();
-      bool done = task.status == TaskStatus::Done;
-      bool selected = viewport && task.id == viewport->selected_id;
-      if (highlight) {
-        line = "\033[1m" + line;
-      }
-      if (done) {
-        line = "\033[2m" + line;
-      }
-      if (selected) {
-        line = "\033[7m" + line;
-      }
-      if (highlight || done || selected) {
-        line += "\033[0m";
+    bool selected = viewport && task.id == viewport->selected_id;
+    auto label = terminal_safe_text(
+      sanitize_task_text(task_label(task, id_width)));
+    std::vector<std::string> lines{viewport
+      ? truncate_watch_text(label, width) : truncate_display(label, width)};
+    if (selected) {
+      lines = selected_row_lines(task, id_width, width);
+      if (lines.size() > layout.selected_lines) {
+        lines.resize(layout.selected_lines);
+        if (!lines.empty()) {
+          lines.back() = width > 0
+            ? clip_watch_text(lines.back(), width - 1) + "…" : "";
+        }
       }
     }
-    frame += '\n' + line;
+    for (auto& line : lines) {
+      line = color_task_ids(line, colors);
+      if (options.tty) {
+        bool highlight = since_change.count() >= 0 &&
+                         since_change.count() < 10 &&
+                         std::find(changed_ids.begin(), changed_ids.end(),
+                                    task.id) != changed_ids.end();
+        bool done = task.status == TaskStatus::Done;
+        if (highlight) {
+          line = "\033[1m" + line;
+        }
+        if (done) {
+          line = "\033[2m" + line;
+        }
+        if (selected) {
+          line = "\033[7m" + line;
+        }
+        if (highlight || done || selected) {
+          line += "\033[0m";
+        }
+      }
+      frame += '\n' + line;
+    }
   }
   if (summary && remaining > count) {
     frame += '\n' + truncate_display(

@@ -123,6 +123,8 @@ macOS and Linux; Windows currently exits with an unsupported-mode message.
 The selected task appears in reverse video and follows its id when the list
 changes. The view scrolls to keep the selection visible. The bottom row shows
 the mode, operation results, and key hints.
+Long selected tasks wrap with aligned continuation lines, ending in `…` when
+the pane is too short to show the whole task.
 
 | Keys | Action in normal mode |
 | --- | --- |
