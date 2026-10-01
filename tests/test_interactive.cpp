@@ -283,6 +283,12 @@ static void test_changes_and_undo() {
                                   change.undo).changed);
   CHECK(!apply_interactive_action(tasks, {ActionType::Undo, {}, {}}).changed);
   CHECK(!added.empty());
+  // Sanitization must not truncate a valid multibyte character in half.
+  auto long_text = std::string(496, 'x') + "\xe7\x8c\xab" + "ab";
+  result = apply_interactive_action(tasks, {ActionType::Add, {}, long_text});
+  CHECK(result.changed);
+  CHECK(tasks.back().text.size() <= 500);
+  CHECK(terminal_safe_text(tasks.back().text) == tasks.back().text);
   // A timestamp-only external update also invalidates undo.
   tasks = {task("aa", "First")};
   change = apply_interactive_action(tasks,

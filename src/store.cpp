@@ -85,7 +85,14 @@ std::string sanitize_task_text(const std::string& text) {
     output.replace(position, 2, " ");
   }
   if (output.size() > 500) {
-    output = output.substr(0, 497) + "...";
+    std::size_t end = 497;
+    // The byte limit must not split a printable UTF-8 character entered
+    // in the watch editor (or supplied by the CLI).
+    while (end > 0 &&
+           (static_cast<unsigned char>(output[end]) & 0xc0) == 0x80) {
+      --end;
+    }
+    output = output.substr(0, end) + "...";
   }
   return output;
 }
