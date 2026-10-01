@@ -28,6 +28,29 @@ struct WatchViewport {
   std::string selected_id;
 };
 
+// Inputs are already terminal-safe. Width excludes the reserved last column.
+// If the prefix leaves no room for text, fall back to one clipped line.
+std::vector<std::string> wrap_watch_row(const std::string& prefix,
+                                      const std::string& text, int width);
+
+struct WatchRowLayout {
+  std::size_t first_row = 0;
+  std::size_t count = 0;
+  std::size_t selected_lines = 0;
+  std::size_t more = 0;
+};
+
+// Slots exclude header/status. Only the selected row has variable height.
+WatchRowLayout layout_watch_rows(std::size_t count, std::size_t selected,
+                                 std::size_t selected_height,
+                                 std::size_t first_row, std::size_t slots);
+
+// Terminal width includes the reserved column; height excludes status,
+// but includes the header.
+WatchRowLayout layout_watch_viewport(const std::vector<Task>& tasks,
+                                     const WatchViewport& viewport,
+                                     int width, int height);
+
 // Formats time as HH:MM:SS in the local time zone.
 std::string format_local_clock(std::chrono::system_clock::time_point time);
 std::optional<double> parse_watch_interval(const std::string& value);

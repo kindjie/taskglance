@@ -442,7 +442,184 @@ static void test_interactive_frames() {
   CHECK(frame().text.find("\033[2J") == std::string::npos);
 }
 
+static void test_wrapped_frames() {
+  std::vector<Task> tasks;
+  for (int i = 0; i < 8; ++i) {
+    tasks.push_back(task("a" + std::to_string(i), "short", i));
+  }
+  InteractiveState state;
+  auto render = [&](int width = 15, int height = 8,
+                    std::vector<std::string> changed = {}) {
+    return build_interactive_frame(tasks, state, changed, width, height,
+                                    {}, 0s, false);
+  };
+  auto row_lines = [](const std::string& frame) {
+    std::vector<std::string> lines;
+    std::istringstream input(frame);
+    for (std::string line; std::getline(input, line);) {
+      lines.push_back(line);
+    }
+    return lines;
+  };
+  for (int selected : {0, 4, 7}) {
+    tasks[selected].text = "one two three four";
+    state.selected_id = tasks[selected].id;
+    reload_interactive(state, tasks, true);
+    state.first_row = 0;
+    auto output = render();
+    auto lines = row_lines(output.text);
+    auto plain = unstyled(output.text);
+    auto id = "[" + tasks[selected].id + "] ";
+    CHECK(plain.find(id + "one two\n     three\n     four") !=
+          std::string::npos);
+    auto expected_first = selected == 0 ? 0u :
+                          (selected == 4 ? 2u : 5u);
+    CHECK(output.first_row == expected_first);
+    CHECK(lines.size() == 8);
+    std::size_t highlighted = 0;
+    for (const auto& line : lines) {
+      if (line.find("\033[7m") != std::string::npos) {
+        ++highlighted;
+        CHECK(line.ends_with("\033[0m"));
+      }
+      CHECK(display_width(unstyled(line)) <= 14);
+    }
+    CHECK(highlighted == 3);
+    if (selected != 7) {
+      CHECK(plain.find(selected == 0 ? "+5 more" : "+3 more") !=
+            std::string::npos);
+    } else {
+      CHECK(plain.find(" more") == std::string::npos);
+    }
+    // In a short pane all task slots belong to the selected row; no summary
+    // or another task may displace its capped last line.
+    auto short_frame = render(15, 4);
+    auto short_lines = row_lines(short_frame.text);
+    CHECK(short_lines.size() == 4);
+    CHECK(unstyled(short_lines[1]) == id + "one two");
+    CHECK(unstyled(short_lines[2]) == "     three…");
+    CHECK(short_lines[2].find("\033[7m") != std::string::npos);
+    CHECK(unstyled(short_lines[3]).find("[NORMAL]") == 0);
+    CHECK(short_frame.first_row == static_cast<std::size_t>(selected));
+    tasks[selected].text = "short";
+  }
+
+  tasks = {task("aa", "one two three four"),
+           task("ab", "another long task with many words", 1)};
+  state = {};
+  reload_interactive(state, tasks, true);
+  auto wide = unstyled(render(60).text);
+  CHECK(wide.find("[aa] one two three four\n") != std::string::npos);
+  auto read_only = build_watch_frame(tasks, {}, 15, 8, {}, 0s, {});
+  CHECK(std::count(read_only.begin(), read_only.end(), '\n') == 2);
+  CHECK(read_only.find("     three") == std::string::npos);
+  CHECK(unstyled(render().text).find("\n     three\n") !=
+        std::string::npos);
+  // The unselected task stays on one truncated line.
+  CHECK(unstyled(render().text).find("[ab] anothe...") != std::string::npos);
+  key(state, "j");
+  auto moved = unstyled(render().text);
+  CHECK(moved.find("[aa] one tw...") != std::string::npos);
+  CHECK(moved.find("[ab] another\n     long task\n") != std::string::npos);
+  state.first_row = 1;
+  state.mode = InteractiveMode::Help;
+  CHECK(render().first_row == 1);
+  state.mode = InteractiveMode::Normal;
+
+  state.filter = "one";
+  reload_interactive(state, tasks, true);
+  CHECK(state.selected_id == "aa");
+  CHECK(unstyled(render().text).find("     four") != std::string::npos);
+  tasks[0].text = "one café 猫猫猫 unsafe\033[2J\xff";
+  reload_interactive(state, tasks, true);
+  for (int width : {1, 2, 3, 4, 6, 8, 10, 15, 60}) {
+    for (const auto& line : row_lines(unstyled(render(width).text))) {
+      if (display_width(line) > width - 1) {
+        std::cerr << "width " << width << " measured "
+                  << display_width(line) << " bytes " << line.size()
+                  << " line:";
+        for (unsigned char ch : line) {
+          std::cerr << ' ' << std::hex << static_cast<int>(ch) << std::dec;
+        }
+        std::cerr << '\n';
+      }
+      CHECK(display_width(line) <= width - 1);
+      CHECK(terminal_safe_text(line) == line);
+    }
+    CHECK(render(width).text.find("\033[2J") == std::string::npos);
+  }
+  state.filter.clear();
+  tasks = {task("aa", "one two three four")};
+  tasks[0].status = TaskStatus::Done;
+  reload_interactive(state, tasks, true);
+  auto styled = row_lines(render(15, 8, {"aa"}).text);
+  for (std::size_t i = 1; i <= 3; ++i) {
+    CHECK(styled[i].starts_with("\033[7m\033[2m\033[1m"));
+    CHECK(styled[i].ends_with("\033[0m"));
+  }
+}
+
+static void test_wrapping_and_layout() {
+  CHECK((wrap_watch_row("[aa] ", "one two three four", 14) ==
+         std::vector<std::string>{"[aa] one two", "     three", "     four"}));
+  CHECK((wrap_watch_row("[aa] ", "abcdefghijk", 10) ==
+         std::vector<std::string>{"[aa] abcde", "     fghij", "     k"}));
+  // Every line fits and no character is lost, whatever width the platform
+  // gives wide characters (display_width counts each as 1 on Windows).
+  auto wide = wrap_watch_row("[aa] ", "café 猫猫猫", 10);
+  std::string rejoined;
+  for (const auto& line : wide) {
+    CHECK(display_width(line) <= 10);
+    rejoined += line.substr(5);
+  }
+  CHECK(wide.front().rfind("[aa] café", 0) == 0);
+  CHECK(rejoined == "café猫猫猫");
+#ifndef _WIN32
+  CHECK((wide == std::vector<std::string>{"[aa] café", "     猫猫",
+                                          "     猫"}));
+#endif
+  CHECK((wrap_watch_row("[aa] ", "fits", 9) ==
+         std::vector<std::string>{"[aa] fits"}));
+  CHECK((wrap_watch_row("[abc] ", "one two three", 13) ==
+         std::vector<std::string>{"[abc] one two", "      three"}));
+  CHECK(layout_watch_rows(0, 0, 3, 0, 6).count == 0);
+  CHECK(layout_watch_rows(8, 4, 3, 0, 0).count == 0);
+  auto top = layout_watch_rows(8, 0, 3, 0, 6);
+  CHECK(top.first_row == 0 && top.count == 3 && top.more == 5);
+  auto middle = layout_watch_rows(8, 4, 3, 0, 6);
+  CHECK(middle.first_row == 2 && middle.count == 3 && middle.more == 3);
+  auto last = layout_watch_rows(8, 7, 3, 0, 6);
+  CHECK(last.first_row == 5 && last.count == 3 && last.more == 0);
+  auto capped = layout_watch_rows(8, 4, 20, 0, 3);
+  CHECK(capped.first_row == 4 && capped.count == 1 &&
+        capped.selected_lines == 3 && capped.more == 0);
+  auto exact = layout_watch_rows(3, 2, 4, 0, 4);
+  CHECK(exact.first_row == 2 && exact.count == 1 &&
+        exact.selected_lines == 4 && exact.more == 0);
+  // Selection visibility and the pane's line budget hold for stale scroll
+  // positions, including after filtering and terminal size changes.
+  for (std::size_t selected = 0; selected < 8; ++selected) {
+    for (std::size_t first : {0u, 3u, 7u, 99u}) {
+      for (std::size_t slots = 1; slots <= 8; ++slots) {
+        for (std::size_t row_height : {1u, 3u, 10u}) {
+          auto layout = layout_watch_rows(8, selected, row_height,
+                                          first, slots);
+          CHECK(layout.first_row <= selected);
+          CHECK(selected < layout.first_row + layout.count);
+          CHECK(layout.selected_lines == std::min(row_height, slots));
+          CHECK(layout.count - 1 + layout.selected_lines +
+                (layout.more > 0 ? 1 : 0) <= slots);
+          CHECK(layout.more == 0 ||
+                layout.more == 8 - layout.first_row - layout.count);
+        }
+      }
+    }
+  }
+}
+
 int main() {
+  test_wrapping_and_layout();
+  test_wrapped_frames();
   test_normal_keys();
   test_help_quit_sequence();
   test_selection_and_filter();

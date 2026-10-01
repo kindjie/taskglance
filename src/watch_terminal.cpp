@@ -284,11 +284,11 @@ int run_watch(const std::filesystem::path& file, double interval,
     std::string frame;
     std::optional<int> cursor;
     if (options.interactive) {
-      taskglance::scroll_interactive(interactive, page_rows());
       auto rendered = taskglance::build_interactive_frame(
         tasks, interactive, changed_ids, size.width, size.height,
         last_change, Seconds(now - changed_at), options.color
       );
+      interactive.first_row = rendered.first_row;
       frame = std::move(rendered.text);
       cursor = rendered.cursor_column;
     } else {

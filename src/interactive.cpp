@@ -553,6 +553,12 @@ InteractiveFrame build_interactive_frame(
   }
   lines.resize(static_cast<std::size_t>(height - 1));
   InteractiveFrame result;
+  result.first_row = state.first_row;
+  if (state.mode != InteractiveMode::Help) {
+    WatchViewport viewport{state.visible, state.first_row, state.selected_id};
+    result.first_row = layout_watch_viewport(tasks, viewport, width,
+                                            height - 1).first_row;
+  }
   auto prefix = clip_line("[" + mode_label(state.mode) + "] ", columns);
   std::string status;
   if (is_editing(state.mode)) {

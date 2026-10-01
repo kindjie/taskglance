@@ -90,6 +90,8 @@ ChangeResult apply_interactive_action(
 
 struct InteractiveFrame {
   std::string text;
+  // Carry the pure layout's scroll position forward to the next frame.
+  std::size_t first_row = 0;
   // One-based terminal column on the bottom row; absent in normal mode.
   std::optional<int> cursor_column;
 };
