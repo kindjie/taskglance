@@ -364,14 +364,20 @@ static void test_watch_completions_in_all_shells() {
     CHECK(completion.find("watch") != std::string::npos);
     CHECK(completion.find("interval") != std::string::npos);
     CHECK(completion.find("all") != std::string::npos);
+    CHECK(completion.find("interactive") != std::string::npos);
   }
   auto bash = completion_script("bash", true);
   CHECK(bash.find("_tg_complete") != std::string::npos);
   CHECK(bash.find("COMP_WORDS[COMP_CWORD]") != std::string::npos);
   CHECK(bash.find("COMP_WORDS[COMP_CWORD-1]") != std::string::npos);
+  CHECK(bash.find("--interactive -i") != std::string::npos);
+  auto zsh = completion_script("zsh", false);
+  CHECK(zsh.find("(-i)--interactive") != std::string::npos);
+  CHECK(zsh.find("(--interactive)-i") != std::string::npos);
   auto fish = completion_script("fish", false);
   CHECK(fish.find("__fish_seen_subcommand_from watch") != std::string::npos);
   CHECK(fish.find("-l interval -r") != std::string::npos);
+  CHECK(fish.find("-l interactive -s i") != std::string::npos);
 }
 
 int main() {

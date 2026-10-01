@@ -97,17 +97,67 @@ taskglance watch
 taskglance watch --interval 0.5 --all
 ```
 
-Watch is read-only. It polls file contents every second by default;
-`--interval` accepts fractional seconds down to 0.1. Active tasks appear oldest
-first, with completed tasks following when `--all` is set. Added or edited
-tasks and status changes appear bold for 10 seconds. The header shows the
-active count and the local time of the last observed change, initially the
-start time. Long lines are truncated and tasks beyond the pane's height are
-summarized as `+N more`.
+Without `--interactive`, watch is read-only. It polls file contents every
+second by default; `--interval` accepts fractional seconds down to 0.1.
+Active tasks appear oldest first, with completed tasks following when `--all`
+is set. Added or edited tasks and status changes appear bold for 10 seconds.
+The header shows the active count and the local time of the last observed
+change, initially the start time. Long lines are truncated and tasks beyond
+the pane's height are summarized as `+N more`.
 
 Ctrl-C exits cleanly and restores the screen and cursor. When stdout is piped
 or redirected, watch prints a plain frame at startup and after each file
 change, separated by a blank line, without terminal escape sequences.
+
+## Interactive watch
+
+Use vim keys to act on tasks while other processes keep updating the list:
+
+```sh
+taskglance watch --interactive
+taskglance watch -i --all --interval 0.5
+```
+
+Interactive mode requires both stdin and stdout to be terminals. It supports
+macOS and Linux; Windows currently exits with an unsupported-mode message.
+The selected task appears in reverse video and follows its id when the list
+changes. The view scrolls to keep the selection visible. The bottom row shows
+the mode, operation results, and key hints.
+
+| Keys | Action in normal mode |
+| --- | --- |
+| `j` / `k`, Down / Up | Select next / previous task |
+| `gg` / `G` | Select first / last task |
+| Ctrl-d / Ctrl-u | Move down / up half a page |
+| `a` / `o` | Add a task with an empty editor |
+| `e` / `cw` | Edit the selected task's text |
+| `x` | Toggle the selected task between active and done |
+| `dd`, then `y` / `n` | Confirm / cancel deletion |
+| `u` | Undo the last change made in this watch session |
+| `/` | Filter tasks by a case-insensitive substring |
+| `?` | Show key help; `?` or Esc closes it |
+| Esc | Cancel a pending key sequence |
+| `q` / `ZZ` | Quit |
+
+The add, edit, and filter editors accept printable UTF-8. Use Left / Right,
+Home / End or Ctrl-a / Ctrl-e to move the cursor, Backspace to delete a
+character, Ctrl-w to delete the preceding word, and Ctrl-u to clear the line.
+Enter saves task text or keeps the filter. Esc cancels an add or edit; in the
+filter editor it clears the filter. An empty add leaves the list unchanged.
+Case matching uses the terminal locale, including its UTF-8 case pairs.
+Without `--all`, toggling a task to done removes it from the visible list;
+`u` can restore it.
+
+Each change loads the current file under the same exclusive lock as the CLI
+and targets an exact task id. If another process deletes a target, the status
+line reports it. Undo keeps session history in memory and checks the recorded
+task against the current file before changing it. If that task changed
+externally or its deleted id was reused, undo reports a conflict and leaves
+the file unchanged. Unrelated external changes are preserved.
+
+External changes still poll and highlight as in read-only watch, including
+while editing or viewing help. Ctrl-C also quits. Terminal input, the screen,
+and the cursor are restored on exit, including SIGINT, SIGTERM, and SIGHUP.
 
 ## Prompt Rendering
 
