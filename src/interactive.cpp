@@ -1,6 +1,7 @@
 #include "taskglance/interactive.hpp"
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 #include "taskglance/util.hpp"
@@ -127,10 +128,16 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
       if (following == '[' || following == 'O') {
         auto end = offset + 2;
         while (end < pending_.size() &&
-               (pending_[end] < 0x40 || pending_[end] > 0x7e)) {
+               pending_[end] >= 0x20 && pending_[end] <= 0x3f) {
           ++end;
         }
         if (end == pending_.size()) break;
+        auto final = static_cast<unsigned char>(pending_[end]);
+        if (final < 0x40 || final > 0x7e) {
+          // A control interrupts an incomplete CSI (especially Ctrl-C).
+          offset = end;
+          continue;
+        }
         length = end - offset + 1;
         key = escape_key(pending_.substr(offset, length));
       } else {
@@ -144,9 +151,17 @@ std::vector<Key> KeyDecoder::feed(std::string_view bytes) {
       if (byte >= 0xc2 && byte <= 0xdf) length = 2;
       else if (byte >= 0xe0 && byte <= 0xef) length = 3;
       else if (byte >= 0xf0 && byte <= 0xf4) length = 4;
-      if (offset + length > pending_.size()) break;
+      auto end = std::min(offset + length, pending_.size());
+      bool valid_tail = true;
+      for (auto i = offset + 1; i < end; ++i) {
+        if ((static_cast<unsigned char>(pending_[i]) & 0xc0) != 0x80) {
+          valid_tail = false;
+          break;
+        }
+      }
+      if (valid_tail && offset + length > pending_.size()) break;
       auto text = pending_.substr(offset, length);
-      if (terminal_safe_text(text) == text) {
+      if (valid_tail && terminal_safe_text(text) == text) {
         key = {KeyType::Text, text};
       } else {
         // Resynchronize at the next byte, including ASCII after bad UTF-8.
@@ -406,6 +421,132 @@ ChangeResult apply_interactive_action(
   }
   return {true, message, action.type == ActionType::Delete ? "" : action.id,
           change};
+}
+
+namespace {
+
+// Clip by complete code points, without an ellipsis eating the cursor's
+// cell. Call only on terminal_safe_text output.
+std::string clip_line(const std::string& text, int width) {
+  std::string output;
+  int used = 0;
+  for (std::size_t i = 0; i < text.size();) {
+    auto end = next_character(text, i);
+    auto character = text.substr(i, end - i);
+    auto columns = display_width(character);
+    if (used + columns > width) break;
+    output += character;
+    used += columns;
+    i = end;
+  }
+  return output;
+}
+
+bool is_editing(InteractiveMode mode) {
+  return mode == InteractiveMode::Add || mode == InteractiveMode::Edit ||
+         mode == InteractiveMode::Filter;
+}
+
+std::string mode_label(InteractiveMode mode) {
+  switch (mode) {
+    case InteractiveMode::Add: return "ADD";
+    case InteractiveMode::Edit: return "EDIT";
+    case InteractiveMode::Filter: return "FILTER";
+    case InteractiveMode::Confirm: return "CONFIRM";
+    case InteractiveMode::Help: return "HELP";
+    default: return "NORMAL";
+  }
+}
+
+}  // namespace
+
+InteractiveFrame build_interactive_frame(
+  const std::vector<Task>& tasks, const InteractiveState& state,
+  const std::vector<std::string>& changed_ids, int width, int height,
+  std::chrono::system_clock::time_point last_change,
+  std::chrono::duration<double> since_change, bool color
+) {
+  if (width <= 0 || height <= 0) return {};
+  int columns = width - 1;
+  std::vector<std::string> lines;
+  if (state.mode == InteractiveMode::Help) {
+    static constexpr std::array help = {
+      "taskglance | Interactive watch keys",
+      "j/k Up/Down: move | gg/G: first/last | Ctrl-d/u: half page",
+      "a/o: add | e/cw: edit | x: toggle done/active",
+      "dd then y/n: delete | u: undo last session change",
+      "/: filter | Enter: keep | Esc: clear/cancel",
+      "Editor: UTF-8, Backspace, Ctrl-w/u, arrows, Home/End, Ctrl-a/e",
+      "q or ZZ: quit | ? or Esc: close help"
+    };
+    for (auto line : help) {
+      if (lines.size() >= static_cast<std::size_t>(height - 1)) break;
+      lines.push_back(clip_line(line, columns));
+    }
+  } else if (height > 1) {
+    WatchOptions options;
+    options.tty = true;
+    options.all = true;
+    options.color = color;
+    WatchViewport viewport{state.visible, state.first_row, state.selected_id};
+    auto frame = build_watch_frame(tasks, changed_ids, width, height - 1,
+                                   last_change, since_change, options,
+                                   &viewport);
+    std::size_t start = 0;
+    do {
+      auto end = frame.find('\n', start);
+      lines.push_back(frame.substr(start, end - start));
+      if (end == std::string::npos) break;
+      start = end + 1;
+    } while (true);
+    // With a one-column terminal the only usable width is zero.
+    if (columns == 0) {
+      for (auto& line : lines) line.clear();
+    }
+  }
+  lines.resize(static_cast<std::size_t>(height - 1));
+  InteractiveFrame result;
+  auto prefix = clip_line("[" + mode_label(state.mode) + "] ", columns);
+  std::string status;
+  if (is_editing(state.mode)) {
+    auto hint = state.mode == InteractiveMode::Filter
+                  ? " | Enter keep Esc clear" : " | Enter save Esc cancel";
+    if (columns < 45) hint = "";
+    int room = std::max(0, columns - display_width(prefix) -
+                           display_width(hint));
+    // The editor is always terminal-safe; retain the byte cursor when
+    // scrolling horizontally instead of slicing through a UTF-8 character.
+    auto cursor = std::min(state.editor.cursor, state.editor.text.size());
+    std::size_t start = 0;
+    auto before_width = display_width(terminal_safe_text(
+      state.editor.text.substr(0, cursor)));
+    while (start < cursor && before_width >= room) {
+      auto next = next_character(state.editor.text, start);
+      before_width -= display_width(terminal_safe_text(
+        state.editor.text.substr(start, next - start)));
+      start = next;
+    }
+    auto text = terminal_safe_text(state.editor.text.substr(start));
+    status = prefix + clip_line(text, room) + hint;
+    auto before_cursor = terminal_safe_text(
+      state.editor.text.substr(start, cursor - start));
+    result.cursor_column = std::max(1, std::min(columns,
+      display_width(prefix) + display_width(before_cursor) + 1));
+  } else {
+    std::string hint = state.mode == InteractiveMode::Confirm
+                         ? " | y delete n cancel" : " | ? help q quit";
+    auto message = state.pending.empty() ? state.message
+                                         : "Pending " + state.pending;
+    if (!state.filter.empty() && state.mode == InteractiveMode::Normal) {
+      message = "/" + state.filter + " | " + message;
+    }
+    int room = std::max(0, columns - display_width(prefix) -
+                           display_width(hint));
+    status = prefix + clip_line(terminal_safe_text(message), room) + hint;
+  }
+  lines.push_back(clip_line(status, columns));
+  result.text = join(lines, "\n");
+  return result;
 }
 
 }  // namespace taskglance

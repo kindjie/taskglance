@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <iostream>
@@ -19,10 +21,13 @@
 #endif
 #include <windows.h>
 #else
+#include <poll.h>
 #include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 #endif
 
+#include "taskglance/interactive.hpp"
 #include "taskglance/util.hpp"
 
 namespace {
@@ -143,6 +148,46 @@ class WatchScreen {
 #endif
 };
 
+#ifndef _WIN32
+class WatchInput {
+ public:
+  explicit WatchInput(bool interactive) : interactive_(interactive) {
+    if (!interactive_) return;
+    if (::tcgetattr(STDIN_FILENO, &previous_) != 0) {
+      throw std::runtime_error("Could not read terminal input settings");
+    }
+    auto raw = previous_;
+    raw.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR |
+                     ICRNL | IXON);
+    raw.c_oflag &= ~OPOST;
+    raw.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    raw.c_cflag &= ~(CSIZE | PARENB);
+    raw.c_cflag |= CS8;
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+    if (::tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+      restore();
+      throw std::runtime_error("Could not enable interactive input");
+    }
+  }
+
+  ~WatchInput() {
+    if (interactive_) restore();
+  }
+
+  WatchInput(const WatchInput&) = delete;
+  WatchInput& operator=(const WatchInput&) = delete;
+
+ private:
+  void restore() {
+    while (::tcsetattr(STDIN_FILENO, TCSANOW, &previous_) != 0 &&
+           errno == EINTR) {}
+  }
+  bool interactive_;
+  struct termios previous_ {};
+};
+#endif
+
 struct Size {
   int width;
   int height;
@@ -178,7 +223,21 @@ int run_watch(const std::filesystem::path& file, double interval,
               taskglance::WatchOptions options) {
   using Clock = std::chrono::steady_clock;
   using Seconds = std::chrono::duration<double>;
+  if (options.interactive) {
+#ifdef _WIN32
+    std::cerr << "interactive mode is not supported on Windows yet\n";
+    return 2;
+#else
+    if (!options.tty || ::isatty(STDIN_FILENO) != 1) {
+      std::cerr << "interactive watch requires stdin and stdout to be TTYs\n";
+      return 2;
+    }
+#endif
+  }
   WatchSignals signals;
+#ifndef _WIN32
+  WatchInput input(options.interactive);
+#endif
   WatchScreen screen(options.tty);
   auto content = taskglance::read_task_file(file);
   auto tasks = taskglance::parse_tasks(content);
@@ -190,22 +249,82 @@ int run_watch(const std::filesystem::path& file, double interval,
   bool redraw = true;
   bool first = true;
   bool highlighting = false;
+  taskglance::InteractiveState interactive;
+  if (options.interactive) {
+    taskglance::reload_interactive(interactive, tasks, options.all);
+  }
+  std::vector<taskglance::UndoChange> undo;
+  taskglance::KeyDecoder decoder;
+  auto escape_at = Clock::now();
+  auto page_rows = [&]() {
+    auto rows = static_cast<std::size_t>(std::max(0, size.height - 2));
+    if (rows > 1 && interactive.visible.size() > rows) --rows;
+    return rows;
+  };
+  auto reload = [&]() {
+    auto next = taskglance::read_task_file(file);
+    polled_at = Clock::now();
+    if (next != content) {
+      auto updated = taskglance::parse_tasks(next);
+      changed_ids = taskglance::detect_task_changes(updated, tasks)
+                      .changed_ids;
+      tasks = std::move(updated);
+      content = std::move(next);
+      last_change = std::chrono::system_clock::now();
+      changed_at = polled_at;
+      highlighting = options.tty && !changed_ids.empty();
+      if (options.interactive) {
+        taskglance::reload_interactive(interactive, tasks, options.all);
+      }
+      redraw = true;
+    }
+  };
+  auto handle_keys = [&](const std::vector<taskglance::Key>& keys) {
+    for (const auto& key : keys) {
+      if (stopped) break;
+      auto action = taskglance::handle_interactive_key(interactive, key,
+                                                       page_rows());
+      redraw = true;
+      if (action.type == taskglance::ActionType::Quit) {
+        stopped = 1;
+        break;
+      }
+      if (action.type != taskglance::ActionType::None) {
+        try {
+          taskglance::ChangeResult result;
+          auto last = undo.empty() ? std::optional<taskglance::UndoChange>{}
+                                     : undo.back();
+          taskglance::update_tasks(file, [&](auto& current) {
+            result = taskglance::apply_interactive_action(current, action,
+                                                           last);
+            return result.changed;
+          });
+          interactive.message = result.message;
+          if (result.changed) {
+            if (action.type == taskglance::ActionType::Undo) {
+              undo.pop_back();
+            } else if (result.undo) {
+              undo.push_back(*result.undo);
+            }
+            if (!result.selected_id.empty()) {
+              interactive.selected_id = result.selected_id;
+            }
+          }
+          reload();
+        } catch (const std::exception& error) {
+          interactive.message = std::string("Change failed: ") + error.what();
+        }
+      }
+      // Filtering changes the view even when no file mutation is requested.
+      taskglance::reload_interactive(interactive, tasks, options.all);
+      taskglance::scroll_interactive(interactive, page_rows());
+    }
+  };
   while (!stopped) {
     auto now = Clock::now();
     if (Seconds(now - polled_at).count() >= interval) {
-      auto next = taskglance::read_task_file(file);
-      polled_at = now;
-      if (next != content) {
-        auto updated = taskglance::parse_tasks(next);
-        changed_ids = taskglance::detect_task_changes(updated, tasks)
-                        .changed_ids;
-        tasks = std::move(updated);
-        content = std::move(next);
-        last_change = std::chrono::system_clock::now();
-        changed_at = now;
-        highlighting = options.tty && !changed_ids.empty();
-        redraw = true;
-      }
+      reload();
+      now = Clock::now();
     }
     if (options.tty) {
       bool resize_requested = resized != 0;
@@ -221,10 +340,22 @@ int run_watch(const std::filesystem::path& file, double interval,
       }
     }
     if (redraw) {
-      auto frame = taskglance::build_watch_frame(
-        tasks, changed_ids, size.width, size.height, last_change,
-        Seconds(now - changed_at), options
-      );
+      std::string frame;
+      std::optional<int> cursor;
+      if (options.interactive) {
+        taskglance::scroll_interactive(interactive, page_rows());
+        auto rendered = taskglance::build_interactive_frame(
+          tasks, interactive, changed_ids, size.width, size.height,
+          last_change, Seconds(now - changed_at), options.color
+        );
+        frame = std::move(rendered.text);
+        cursor = rendered.cursor_column;
+      } else {
+        frame = taskglance::build_watch_frame(
+          tasks, changed_ids, size.width, size.height, last_change,
+          Seconds(now - changed_at), options
+        );
+      }
       if (options.tty) {
         // Overwrite in place and erase leftovers rather than clearing the
         // screen first, which flickers in tmux.
@@ -236,6 +367,14 @@ int run_watch(const std::filesystem::path& file, double interval,
           std::cout << ch;
         }
         std::cout << "\033[K\033[J";
+        if (options.interactive) {
+          if (cursor) {
+            std::cout << "\033[" << size.height << ';' << *cursor
+                      << "H\033[?25h";
+          } else {
+            std::cout << "\033[?25l";
+          }
+        }
       } else {
         if (!first) {
           std::cout << '\n';
@@ -257,7 +396,46 @@ int run_watch(const std::filesystem::path& file, double interval,
       delay = std::min(delay, std::max(0.0, 10.0 -
                                  Seconds(Clock::now() - changed_at).count()));
     }
-    std::this_thread::sleep_for(Seconds(delay));
+#ifndef _WIN32
+    if (options.interactive) {
+      if (decoder.pending_escape()) {
+        delay = std::min(delay, std::max(0.0, 0.025 -
+                         Seconds(Clock::now() - escape_at).count()));
+      }
+      struct pollfd descriptor {STDIN_FILENO, POLLIN, 0};
+      int timeout = static_cast<int>(std::ceil(delay * 1000));
+      int ready = ::poll(&descriptor, 1, timeout);
+      if (stopped) break;
+      if (ready < 0 && errno != EINTR) {
+        throw std::runtime_error("Could not poll interactive input");
+      }
+      if (ready > 0 && (descriptor.revents & POLLIN)) {
+        char bytes[256];
+        auto count = ::read(STDIN_FILENO, bytes, sizeof(bytes));
+        if (count > 0) {
+          // Timeout is measured from the last received byte, including a
+          // partial CSI sequence split over reads.
+          handle_keys(decoder.feed(std::string_view(
+            bytes, static_cast<std::size_t>(count))));
+          escape_at = Clock::now();
+        } else if (count == 0) {
+          stopped = 1;
+        } else if (errno != EINTR && errno != EAGAIN) {
+          throw std::runtime_error("Could not read interactive input");
+        }
+      }
+      if (ready > 0 && (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL))) {
+        stopped = 1;
+      }
+      if (decoder.pending_escape() &&
+          Clock::now() - escape_at >= std::chrono::milliseconds(25)) {
+        handle_keys(decoder.expire_escape());
+      }
+    } else
+#endif
+    {
+      std::this_thread::sleep_for(Seconds(delay));
+    }
   }
   return 0;
 }

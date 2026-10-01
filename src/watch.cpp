@@ -130,7 +130,8 @@ std::string build_watch_frame(
   int width, int height,
   std::chrono::system_clock::time_point last_change,
   std::chrono::duration<double> since_change,
-  const WatchOptions& options
+  const WatchOptions& options,
+  const WatchViewport* viewport
 ) {
   if (width <= 0 || height <= 0) {
     return "";
@@ -141,29 +142,31 @@ std::string build_watch_frame(
   if (options.tty && width > 1) {
     --width;
   }
-  auto visible = options.all ? tasks : active_tasks(tasks);
-  std::stable_sort(visible.begin(), visible.end(), [](const auto& a,
-                                                     const auto& b) {
-    if (a.status != b.status) {
-      return a.status == TaskStatus::Active;
-    }
-    return a.created_at < b.created_at;
-  });
+  auto visible = viewport ? viewport->tasks
+                         : (options.all ? tasks : active_tasks(tasks));
+  if (!viewport) {
+    std::stable_sort(visible.begin(), visible.end(), [](const Task& a,
+                                                      const Task& b) {
+      if (a.status != b.status) {
+        return a.status == TaskStatus::Active;
+      }
+      return a.created_at < b.created_at;
+    });
+  }
   std::ostringstream header;
   header << "taskglance | " << active_tasks(tasks).size()
          << " active | changed " << format_local_clock(last_change);
   std::string frame = truncate_display(header.str(), width);
   auto slots = static_cast<std::size_t>(height - 1);
-  bool overflow = visible.size() > slots;
-  auto count = std::min(visible.size(), slots);
-  if (overflow && slots > 0) {
-    --count;
-  }
+  auto start = viewport ? std::min(viewport->first_row, visible.size()) : 0;
+  auto remaining = visible.size() - start;
+  bool summary = visible.size() > slots && slots > (viewport ? 1u : 0u);
+  auto count = std::min(remaining, slots - (summary ? 1 : 0));
   auto id_width = unique_id_width(tasks, 2, options.all);
   Config colors;
   colors.color = options.tty && options.color;
   for (std::size_t i = 0; i < count; ++i) {
-    const auto& task = visible[i];
+    const auto& task = visible[start + i];
     // Stored/imported data can contain controls; only our styles may emit
     // escape sequences, and truncation must happen before styling.
     auto line = truncate_display(
@@ -176,21 +179,25 @@ std::string build_watch_frame(
                        std::find(changed_ids.begin(), changed_ids.end(),
                                   task.id) != changed_ids.end();
       bool done = task.status == TaskStatus::Done;
+      bool selected = viewport && task.id == viewport->selected_id;
       if (highlight) {
         line = "\033[1m" + line;
       }
       if (done) {
         line = "\033[2m" + line;
       }
-      if (highlight || done) {
+      if (selected) {
+        line = "\033[7m" + line;
+      }
+      if (highlight || done || selected) {
         line += "\033[0m";
       }
     }
     frame += '\n' + line;
   }
-  if (overflow && slots > 0) {
+  if (summary && remaining > count) {
     frame += '\n' + truncate_display(
-      "+" + std::to_string(visible.size() - count) + " more", width
+      "+" + std::to_string(remaining - count) + " more", width
     );
   }
   return frame;

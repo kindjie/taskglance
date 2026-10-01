@@ -88,4 +88,17 @@ ChangeResult apply_interactive_action(
   const std::optional<UndoChange>& undo = std::nullopt
 );
 
+struct InteractiveFrame {
+  std::string text;
+  // One-based terminal column on the bottom row; absent in normal mode.
+  std::optional<int> cursor_column;
+};
+
+InteractiveFrame build_interactive_frame(
+  const std::vector<Task>& tasks, const InteractiveState& state,
+  const std::vector<std::string>& changed_ids, int width, int height,
+  std::chrono::system_clock::time_point last_change,
+  std::chrono::duration<double> since_change, bool color
+);
+
 }  // namespace taskglance

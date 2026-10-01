@@ -19,6 +19,13 @@ struct WatchOptions {
   bool all = false;
   bool tty = false;
   bool color = true;
+  bool interactive = false;
+};
+
+struct WatchViewport {
+  const std::vector<Task>& tasks;  // already ordered and filtered
+  std::size_t first_row = 0;
+  std::string selected_id;
 };
 
 // Formats time as HH:MM:SS in the local time zone.
@@ -35,7 +42,8 @@ std::string build_watch_frame(
   int width, int height,
   std::chrono::system_clock::time_point last_change,
   std::chrono::duration<double> since_change,
-  const WatchOptions& options
+  const WatchOptions& options,
+  const WatchViewport* viewport = nullptr
 );
 
 }  // namespace taskglance

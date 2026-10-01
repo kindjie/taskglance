@@ -1,9 +1,12 @@
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <filesystem>
+#include <sstream>
 
 #include "taskglance/interactive.hpp"
 #include "taskglance/util.hpp"
+#include "taskglance/watch.hpp"
 
 using namespace taskglance;
 using namespace std::chrono_literals;
@@ -216,6 +219,12 @@ static void test_decoder() {
         keys[1].text == "j");
   CHECK(decoder.feed("\033[").empty());
   CHECK(decoder.expire_escape().size() == 1);
+  keys = decoder.feed("\033[\x03");
+  CHECK(keys.size() == 1 && keys[0].type == KeyType::CtrlC);
+  CHECK(!decoder.pending_escape());
+  CHECK(decoder.feed("\xc3").empty());
+  keys = decoder.feed("\x03");
+  CHECK(keys.size() == 1 && keys[0].type == KeyType::CtrlC);
 }
 
 static void test_changes_and_undo() {
@@ -242,23 +251,23 @@ static void test_changes_and_undo() {
     CHECK(tasks.front().status == TaskStatus::Active);
     CHECK(!tasks.front().completed_at);
   }
-  auto change = apply_interactive_action(tasks, {ActionType::Toggle, "aa"});
+  auto change = apply_interactive_action(tasks, {ActionType::Toggle, "aa", {}});
   CHECK(tasks.front().status == TaskStatus::Done &&
         tasks.front().completed_at);
-  auto active = apply_interactive_action(tasks, {ActionType::Toggle, "aa"});
+  auto active = apply_interactive_action(tasks, {ActionType::Toggle, "aa", {}});
   CHECK(tasks.front().status == TaskStatus::Active);
-  apply_interactive_action(tasks, {ActionType::Undo}, active.undo);
+  apply_interactive_action(tasks, {ActionType::Undo, {}, {}}, active.undo);
   CHECK(tasks.front().status == TaskStatus::Done);
-  apply_interactive_action(tasks, {ActionType::Undo}, change.undo);
+  apply_interactive_action(tasks, {ActionType::Undo, {}, {}}, change.undo);
   CHECK(tasks.front().status == TaskStatus::Active);
   change = apply_interactive_action(tasks, {ActionType::Edit, "aa", "Edit"});
   tasks.front().text = "External edit";
-  result = apply_interactive_action(tasks, {ActionType::Undo}, change.undo);
+  result = apply_interactive_action(tasks, {ActionType::Undo, {}, {}}, change.undo);
   CHECK(!result.changed && result.message.find("changed") !=
         std::string::npos);
   CHECK(tasks.front().text == "External edit");
   tasks.erase(tasks.begin());
-  result = apply_interactive_action(tasks, {ActionType::Undo}, change.undo);
+  result = apply_interactive_action(tasks, {ActionType::Undo, {}, {}}, change.undo);
   CHECK(!result.changed && result.message.find("vanished") !=
         std::string::npos);
   for (auto type : {ActionType::Edit, ActionType::Toggle, ActionType::Delete}) {
@@ -267,13 +276,20 @@ static void test_changes_and_undo() {
           std::string::npos);
   }
   // Exact id, never an abbreviated prefix.
-  CHECK(!apply_interactive_action(tasks, {ActionType::Delete, "a"}).changed);
-  change = apply_interactive_action(tasks, {ActionType::Delete, "ab"});
+  CHECK(!apply_interactive_action(tasks, {ActionType::Delete, "a", {}}).changed);
+  change = apply_interactive_action(tasks, {ActionType::Delete, "ab", {}});
   tasks.push_back(task("ab", "Reused id"));
-  CHECK(!apply_interactive_action(tasks, {ActionType::Undo},
+  CHECK(!apply_interactive_action(tasks, {ActionType::Undo, {}, {}},
                                   change.undo).changed);
-  CHECK(!apply_interactive_action(tasks, {ActionType::Undo}).changed);
+  CHECK(!apply_interactive_action(tasks, {ActionType::Undo, {}, {}}).changed);
   CHECK(!added.empty());
+  // A timestamp-only external update also invalidates undo.
+  tasks = {task("aa", "First")};
+  change = apply_interactive_action(tasks,
+                                    {ActionType::Edit, "aa", "Edited"});
+  tasks[0].created_at += 1s;
+  CHECK(!apply_interactive_action(tasks, {ActionType::Undo, {}, {}},
+                                  change.undo).changed);
 }
 
 static void test_locked_changes_and_persisted_undo() {
@@ -301,22 +317,85 @@ static void test_locked_changes_and_persisted_undo() {
   });
   auto edit = run({ActionType::Edit, displayed[0].id, "Edited"});
   CHECK(load_tasks(file).size() == 2 && edit.changed);
-  CHECK(run({ActionType::Undo}, edit.undo).changed);
+  CHECK(run({ActionType::Undo, {}, {}}, edit.undo).changed);
   CHECK(load_tasks(file)[0].text == "Original");
-  auto toggle = run({ActionType::Toggle, id});
-  CHECK(run({ActionType::Undo}, toggle.undo).changed);
+  auto toggle = run({ActionType::Toggle, id, {}});
+  CHECK(run({ActionType::Undo, {}, {}}, toggle.undo).changed);
   CHECK(load_tasks(file)[0].status == TaskStatus::Active);
-  auto deletion = run({ActionType::Delete, id});
-  CHECK(run({ActionType::Undo}, deletion.undo).changed);
+  auto deletion = run({ActionType::Delete, id, {}});
+  CHECK(run({ActionType::Undo, {}, {}}, deletion.undo).changed);
   CHECK(load_tasks(file).size() == 2);
-  CHECK(run({ActionType::Undo}, add.undo).changed);
+  CHECK(run({ActionType::Undo, {}, {}}, add.undo).changed);
   CHECK(load_tasks(file).size() == 1);
   CHECK(load_tasks(file)[0].text == "External");
   auto before = read_task_file(file);
   CHECK(!run({ActionType::Edit, id, "Vanished"}).changed);
-  CHECK(!run({ActionType::Undo}, add.undo).changed);
+  CHECK(!run({ActionType::Undo, {}, {}}, add.undo).changed);
   CHECK(read_task_file(file) == before);
   std::filesystem::remove_all(root);
+}
+
+static std::string unstyled(const std::string& text) {
+  std::string result;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '\033') {
+      CHECK(text[i + 1] == '[');
+      i = text.find('m', i);
+      CHECK(i != std::string::npos);
+    } else {
+      result += text[i];
+    }
+  }
+  return result;
+}
+
+static void test_interactive_frames() {
+  InteractiveState state;
+  std::vector<Task> tasks{task("aa", "First"), task("ab", "Second", 1),
+                          task("ac", "Third", 2)};
+  reload_interactive(state, tasks, true);
+  auto frame = [&](int width = 80, int height = 6) {
+    return build_interactive_frame(tasks, state, {"aa"}, width, height,
+                                    {}, 0s, false);
+  };
+  auto rendered = frame();
+  CHECK(rendered.text.find("\033[7m") != std::string::npos);
+  auto plain = unstyled(rendered.text);
+  CHECK(plain.find("[aa] First") != std::string::npos);
+  CHECK(plain.find("[NORMAL]") > plain.find("Third"));
+  CHECK(!rendered.cursor_column);
+  CHECK(std::count(plain.begin(), plain.end(), '\n') == 5);
+  state.message = "bad\033[2J\xc2\x9b\xff";
+  CHECK(frame().text.find("\033[2J") == std::string::npos);
+  key(state, "G");
+  scroll_interactive(state, 1);
+  CHECK(unstyled(frame(80, 3).text).find("Third") != std::string::npos);
+  key(state, "e");
+  state.editor.text = "caf\xc3\xa9 \xe7\x8c\xab";
+  state.editor.cursor = state.editor.text.size();
+  for (int width : {1, 2, 3, 8, 20, 80}) {
+    for (int height : {1, 2, 3, 6}) {
+      auto output = frame(width, height);
+      std::istringstream in(unstyled(output.text));
+      std::string line;
+      while (std::getline(in, line)) {
+        CHECK(display_width(line) <= width - 1);
+        CHECK(terminal_safe_text(line) == line);
+      }
+      CHECK(output.cursor_column);
+      CHECK(*output.cursor_column >= 1);
+      CHECK(*output.cursor_column <= std::max(1, width - 1));
+    }
+  }
+  CHECK(frame(80, 0).text.empty());
+  CHECK(frame(0, 6).text.empty());
+  special(state, KeyType::Escape);
+  key(state, "?");
+  CHECK(unstyled(frame().text).find("gg/G") != std::string::npos);
+  special(state, KeyType::Escape);
+  tasks[0].text = "Unsafe\033[2J\xff";
+  reload_interactive(state, tasks, true);
+  CHECK(frame().text.find("\033[2J") == std::string::npos);
 }
 
 int main() {
@@ -326,5 +405,6 @@ int main() {
   test_decoder();
   test_changes_and_undo();
   test_locked_changes_and_persisted_undo();
+  test_interactive_frames();
   std::cout << "interactive tests passed\n";
 }
