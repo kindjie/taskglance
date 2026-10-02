@@ -118,8 +118,15 @@ std::chrono::system_clock::time_point task_file_updated(
   std::error_code error;
   auto modified = std::filesystem::last_write_time(file, error);
   if (error) return {};
+#ifdef _WIN32
+  // MSVC file_clock exposes to_utc; clock_cast handles that conversion.
+  auto system_time =
+    std::chrono::clock_cast<std::chrono::system_clock>(modified);
+#else
+  auto system_time = std::chrono::file_clock::to_sys(modified);
+#endif
   return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-    std::chrono::file_clock::to_sys(modified));
+    system_time);
 }
 
 class WatchScreen {
