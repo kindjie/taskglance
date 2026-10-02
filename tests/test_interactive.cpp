@@ -427,7 +427,7 @@ static void test_interactive_frames() {
   CHECK(rendered.text.find("\033[7m") != std::string::npos);
   auto plain = unstyled(rendered.text);
   CHECK(plain.find("[aa] First") != std::string::npos);
-  CHECK(plain.find("[NORMAL]") > plain.find("Third"));
+  CHECK(plain.find("3 tasks") > plain.find("Third"));
   CHECK(!rendered.cursor_column);
   CHECK(std::count(plain.begin(), plain.end(), '\n') == 5);
   state.message = "bad\033[2J\xc2\x9b\xff";
@@ -469,7 +469,7 @@ static void test_wrapped_frames() {
     tasks.push_back(task("a" + std::to_string(i), "short", i));
   }
   InteractiveState state;
-  auto render = [&](int width = 15, int height = 8,
+  auto render = [&](int width = 17, int height = 8,
                     std::vector<std::string> changed = {}) {
     return build_interactive_frame(tasks, state, changed, width, height,
                                     {}, 0s, false);
@@ -489,9 +489,11 @@ static void test_wrapped_frames() {
     state.first_row = 0;
     auto output = render();
     auto lines = row_lines(output.text);
+    CHECK(lines[0].starts_with("\033[1mMy Tasks"));
+    CHECK(lines.back().starts_with("\033[2m"));
     auto plain = unstyled(output.text);
     auto id = "[" + tasks[selected].id + "] ";
-    CHECK(plain.find(id + "one two\n     three\n     four") !=
+    CHECK(plain.find(id + "one two\n       three\n       four") !=
           std::string::npos);
     auto expected_first = selected == 0 ? 0u :
                           (selected == 4 ? 2u : 5u);
@@ -503,7 +505,7 @@ static void test_wrapped_frames() {
         ++highlighted;
         CHECK(line.ends_with("\033[0m"));
       }
-      CHECK(display_width(unstyled(line)) <= 14);
+      CHECK(display_width(unstyled(line)) <= 16);
     }
     CHECK(highlighted == 3);
     if (selected != 7) {
@@ -514,13 +516,13 @@ static void test_wrapped_frames() {
     }
     // In a short pane all task slots belong to the selected row; no summary
     // or another task may displace its capped last line.
-    auto short_frame = render(15, 4);
+    auto short_frame = render(17, 4);
     auto short_lines = row_lines(short_frame.text);
     CHECK(short_lines.size() == 4);
-    CHECK(unstyled(short_lines[1]) == id + "one two");
-    CHECK(unstyled(short_lines[2]) == "     three…");
+    CHECK(unstyled(short_lines[1]) == "> " + id + "one two");
+    CHECK(unstyled(short_lines[2]) == "       three…");
     CHECK(short_lines[2].find("\033[7m") != std::string::npos);
-    CHECK(unstyled(short_lines[3]).find("[NORMAL]") == 0);
+    CHECK(unstyled(short_lines[3]).find("8 tasks") == 0);
     CHECK(short_frame.first_row == static_cast<std::size_t>(selected));
     tasks[selected].text = "short";
   }
@@ -534,14 +536,14 @@ static void test_wrapped_frames() {
   auto read_only = build_watch_frame(tasks, {}, 15, 8, {}, 0s, {});
   CHECK(std::count(read_only.begin(), read_only.end(), '\n') == 2);
   CHECK(read_only.find("     three") == std::string::npos);
-  CHECK(unstyled(render().text).find("\n     three\n") !=
+  CHECK(unstyled(render().text).find("\n       three\n") !=
         std::string::npos);
   // The unselected task stays on one truncated line.
   CHECK(unstyled(render().text).find("[ab] anothe...") != std::string::npos);
   key(state, "j");
   auto moved = unstyled(render().text);
   CHECK(moved.find("[aa] one tw...") != std::string::npos);
-  CHECK(moved.find("[ab] another\n     long task\n") != std::string::npos);
+  CHECK(moved.find("[ab] another\n       long task\n") != std::string::npos);
   state.first_row = 1;
   state.mode = InteractiveMode::Help;
   CHECK(render().first_row == 1);
@@ -573,10 +575,12 @@ static void test_wrapped_frames() {
   tasks = {task("aa", "one two three four")};
   tasks[0].status = TaskStatus::Done;
   reload_interactive(state, tasks, true);
-  auto styled = row_lines(render(15, 8, {"aa"}).text);
+  auto styled = row_lines(render(17, 8, {"aa"}).text);
   for (std::size_t i = 1; i <= 3; ++i) {
-    CHECK(styled[i].starts_with("\033[7m\033[2m\033[1m"));
+    CHECK(styled[i].starts_with("\033[7m"));
     CHECK(styled[i].ends_with("\033[0m"));
+    CHECK(styled[i].find("\033[2m") == std::string::npos);
+    CHECK(styled[i].find("\033[36m") == std::string::npos);
   }
 }
 

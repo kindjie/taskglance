@@ -68,7 +68,7 @@ std::string truncate_watch_text(const std::string& text, int width) {
 std::vector<std::string> selected_row_lines(const Task& task,
                                            std::size_t id_width, int width) {
   auto prefix = terminal_safe_text(
-    "[" + task.id.substr(0, id_width) + "] ");
+    "> [" + task.id.substr(0, id_width) + "] ");
   auto text = terminal_safe_text(sanitize_task_text(task.text));
   return wrap_watch_row(prefix, text, width);
 }
@@ -145,7 +145,7 @@ WatchRowLayout layout_watch_viewport(const std::vector<Task>& tasks,
     index = std::min(viewport.first_row, viewport.tasks.size() - 1);
   }
   auto lines = selected == viewport.tasks.end() ? 1 : selected_row_lines(
-    *selected, unique_id_width(tasks, 2, true), width - 1).size();
+    *selected, unique_id_width(tasks, 2, true), std::max(0, width - 1)).size();
   return layout_watch_rows(viewport.tasks.size(), index, lines,
                             viewport.first_row,
                             static_cast<std::size_t>(height - 1));
@@ -260,10 +260,11 @@ std::string build_watch_frame(
     });
   }
   std::ostringstream header;
-  header << "taskglance | " << active_tasks(tasks).size()
-         << " active | updated " << (last_change.time_since_epoch().count() == 0
+  header << "My Tasks · " << active_tasks(tasks).size()
+         << " active · updated " << (last_change.time_since_epoch().count() == 0
            ? "unknown" : format_local_clock(last_change));
   std::string frame = truncate_display(header.str(), width);
+  if (viewport) frame = "\033[1m" + frame + "\033[0m";
   auto slots = static_cast<std::size_t>(height - 1);
   auto start = viewport ? std::min(viewport->first_row, visible.size()) : 0;
   auto remaining = visible.size() - start;
@@ -289,6 +290,7 @@ std::string build_watch_frame(
     bool selected = viewport && task.id == viewport->selected_id;
     auto label = terminal_safe_text(
       sanitize_task_text(task_label(task, id_width)));
+    if (viewport) label = "  " + label;
     std::vector<std::string> lines{viewport
       ? truncate_watch_text(label, width) : truncate_display(label, width)};
     if (selected) {
@@ -307,8 +309,8 @@ std::string build_watch_frame(
       }
     }
     for (auto& line : lines) {
-      line = color_task_ids(line, colors);
-      if (colors.color) {
+      if (!selected) line = color_task_ids(line, colors);
+      if (colors.color && !selected) {
         // Colour the task text after the neutral ID; retain inverse selection.
         auto marker = line.find("\033[39m");
         auto tone = task.status == TaskStatus::Done ? "\033[32m" : "\033[36m";
@@ -322,10 +324,10 @@ std::string build_watch_frame(
                          std::find(changed_ids.begin(), changed_ids.end(),
                                     task.id) != changed_ids.end();
         bool done = task.status == TaskStatus::Done;
-        if (highlight) {
+        if (highlight && !selected) {
           line = "\033[1m" + line;
         }
-        if (done) {
+        if (done && !selected) {
           line = "\033[2m" + line;
         }
         if (selected) {

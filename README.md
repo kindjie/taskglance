@@ -243,3 +243,7 @@ reserves the entire wrapped selection before moving the viewport.
 Interactive watch (`watch -i`) supports wheel scrolling and clicking a task
 row to select it, including a wrapped row. Mouse input is ignored while
 editing or confirming changes. Mouse reporting is disabled when watch exits.
+
+Interactive watch uses a bold My Tasks heading, a `>` selection gutter
+and neutral inverse highlighting across the wrapped selection. Unselected
+rows retain status colours; the compact footer uses subdued control hints.

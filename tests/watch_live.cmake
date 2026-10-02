@@ -41,7 +41,7 @@ string(FIND "${output}" "${esc}" escape)
 if(NOT escape EQUAL -1)
   message(FATAL_ERROR "Piped watch emitted an escape sequence:\n${output}")
 endif()
-string(REGEX MATCHALL "taskglance \\| [0-9]+ active" headers "${output}")
+string(REGEX MATCHALL "My Tasks · [0-9]+ active" headers "${output}")
 list(LENGTH headers frames)
 if(NOT frames EQUAL 2 OR
    NOT output MATCHES "1 active.*Before watch.*2 active.*Added while")

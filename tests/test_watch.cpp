@@ -63,7 +63,7 @@ static void test_frames() {
     3661s
   });
   CHECK(clock.size() == 8 && clock[2] == ':' && clock[5] == ':');
-  CHECK(plain.find("taskglance | 2 active | updated " + clock) == 0);
+  CHECK(plain.find("My Tasks · 2 active · updated " + clock) == 0);
   CHECK(plain.find("[ab1] Oldest") < plain.find("[ab2] Newer"));
   CHECK(plain.find("Finished") == std::string::npos);
   CHECK(plain.find('\033') == std::string::npos);

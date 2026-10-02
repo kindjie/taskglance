@@ -563,7 +563,7 @@ InteractiveFrame build_interactive_frame(
   std::vector<std::string> lines;
   if (state.mode == InteractiveMode::Help) {
     static constexpr std::array help = {
-      "taskglance | Interactive watch keys",
+      "My Tasks · Interactive watch keys",
       "j/k Up/Down: move | gg/G: first/last | Ctrl-d/u: half page",
       "a/o: add | e/cw: edit | x: toggle done/active",
       "dd then y/n: delete | u: undo last session change",
@@ -608,7 +608,7 @@ InteractiveFrame build_interactive_frame(
   std::string status;
   if (is_editing(state.mode)) {
     auto hint = state.mode == InteractiveMode::Filter
-                  ? " | Enter keep Esc clear" : " | Enter save Esc cancel";
+                  ? " · Enter keep · Esc clear" : " · Enter save · Esc cancel";
     if (columns < 45) hint = "";
     int room = std::max(0, columns - display_width(prefix) -
                            display_width(hint));
@@ -632,17 +632,25 @@ InteractiveFrame build_interactive_frame(
       display_width(prefix) + display_width(before_cursor) + 1));
   } else {
     std::string hint = state.mode == InteractiveMode::Confirm
-                         ? " | y delete n cancel" : " | ? help q quit";
+                         ? " · y delete · n cancel" : " · ? help · q quit";
     auto message = state.pending.empty() ? state.message
                                          : "Pending " + state.pending;
     if (!state.filter.empty() && state.mode == InteractiveMode::Normal) {
-      message = "/" + state.filter + " | " + message;
+      message = "/" + state.filter + " · " + message;
+    }
+    if (state.mode == InteractiveMode::Normal) {
+      prefix = std::to_string(state.visible.size()) + " tasks";
+      if (!message.empty()) prefix += " · ";
     }
     int room = std::max(0, columns - display_width(prefix) -
                            display_width(hint));
     status = prefix + clip_line(terminal_safe_text(message), room) + hint;
   }
-  lines.push_back(clip_line(status, columns));
+  auto footer = clip_line(status, columns);
+  if (state.mode == InteractiveMode::Normal) {
+    footer = "\033[2m" + footer + "\033[0m";
+  }
+  lines.push_back(footer);
   result.text = join(lines, "\n");
   return result;
 }
