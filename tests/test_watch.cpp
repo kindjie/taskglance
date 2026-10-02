@@ -30,6 +30,20 @@ static std::string frame(const std::vector<Task>& tasks,
                            std::chrono::duration<double>{seconds}, options);
 }
 
+static void test_saved_order_with_active_before_done() {
+  auto done_first = task("dd1", "done first", 0);
+  auto done_second = task("dd2", "done second", -1);
+  done_first.status = done_second.status = TaskStatus::Done;
+  std::vector<Task> tasks{done_first, task("aa1", "priority first", 20),
+                         done_second, task("aa2", "priority second", 10)};
+  WatchOptions options;
+  options.all = true;
+  auto text = frame(tasks, options);
+  CHECK(text.find("priority first") < text.find("priority second"));
+  CHECK(text.find("priority second") < text.find("done first"));
+  CHECK(text.find("done first") < text.find("done second"));
+}
+
 static void test_changes() {
   std::vector<Task> previous{task("ab1111", "First"),
                              task("ab2222", "Second")};
@@ -64,7 +78,7 @@ static void test_frames() {
   });
   CHECK(clock.size() == 8 && clock[2] == ':' && clock[5] == ':');
   CHECK(plain.find("My Tasks · 2 active · updated " + clock) == 0);
-  CHECK(plain.find("[ab1] Oldest") < plain.find("[ab2] Newer"));
+  CHECK(plain.find("[ab2] Newer") < plain.find("[ab1] Oldest"));
   CHECK(plain.find("Finished") == std::string::npos);
   CHECK(plain.find('\033') == std::string::npos);
   CHECK(frame({}).find("0 active") != std::string::npos);
@@ -101,8 +115,8 @@ static void test_frames() {
     }
   }
   auto limited = frame(tasks, {}, 80, 3);
-  CHECK(limited.find("Oldest") != std::string::npos);
-  CHECK(limited.find("Newer") == std::string::npos);
+  CHECK(limited.find("Newer") != std::string::npos);
+  CHECK(limited.find("Oldest") == std::string::npos);
   CHECK(limited.find("+2 more") != std::string::npos);
   CHECK(frame(tasks, {}, 80, 2).find("+3 more") != std::string::npos);
   CHECK(frame(tasks, {}, 80, 1).find('\n') == std::string::npos);
@@ -179,6 +193,7 @@ static void test_intervals() {
 
 int main() {
   test_changes();
+  test_saved_order_with_active_before_done();
   test_frames();
   test_intervals();
   test_task_text_cannot_emit_controls();

@@ -14,6 +14,30 @@
 namespace taskglance {
 namespace {
 
+constexpr std::array<std::pair<const char*, const char*>, 21> help_rows = {{
+  {"Navigation", ""},
+  {"j/k, Up/Down", "Select task"},
+  {"gg / G", "First / last task"},
+  {"Ctrl-d / Ctrl-u", "Move half a page"},
+  {"Wheel / click", "Scroll / select task"},
+  {"", ""},
+  {"Change tasks", ""},
+  {"a / o", "Add task"},
+  {"e / cw", "Edit task"},
+  {"x", "Toggle done or active"},
+  {"dd, then y / n", "Delete; confirm or cancel"},
+  {"u", "Undo last session change"},
+  {"", ""},
+  {"Filter", ""},
+  {"/", "Find tasks"},
+  {"Enter / Esc", "Keep filter / clear or cancel"},
+  {"", ""},
+  {"Text editing", ""},
+  {"Arrows, Home/End", "Move cursor"},
+  {"Ctrl-a / Ctrl-e", "Start / end of text"},
+  {"Ctrl-w / Ctrl-u", "Delete word / clear text"}
+}};
+
 std::size_t previous_character(const std::string& text, std::size_t cursor) {
   if (cursor == 0) return 0;
   --cursor;
@@ -314,7 +338,7 @@ void reload_interactive(InteractiveState& state,
   std::stable_sort(state.visible.begin(), state.visible.end(),
                    [](const Task& a, const Task& b) {
     if (a.status != b.status) return a.status == TaskStatus::Active;
-    return a.created_at < b.created_at;
+    return false;  // Preserve saved order within each status group.
   });
   auto found = std::find_if(state.visible.begin(), state.visible.end(),
                             [&](const Task& t) {
@@ -389,8 +413,22 @@ InteractiveAction handle_interactive_key(InteractiveState& state,
     if (text == "q" || sequence == "ZZ") return {ActionType::Quit, {}, {}};
     if (text == "?" || key.type == KeyType::Escape) {
       state.mode = InteractiveMode::Normal;
-    } else if (text == "Z") {
+    } else if (sequence == "gg") {
+      state.help_offset = 0;
+    } else if (text == "g" || text == "Z") {
       state.pending = text;
+    } else if (text == "G") {
+      state.help_offset = 1000000000;
+    } else {
+      auto step = key.type == KeyType::CtrlD || key.type == KeyType::CtrlU
+                    ? std::max(std::size_t{1}, page_rows / 2) : 1;
+      if (text == "j" || key.type == KeyType::Down ||
+          key.type == KeyType::CtrlD) {
+        state.help_offset = std::min(std::size_t{1000000000}, state.help_offset + step);
+      } else if (text == "k" || key.type == KeyType::Up ||
+                 key.type == KeyType::CtrlU) {
+        state.help_offset -= std::min(state.help_offset, step);
+      }
     }
     return {};
   }
@@ -561,19 +599,31 @@ InteractiveFrame build_interactive_frame(
   if (width <= 0 || height <= 0) return {};
   int columns = width - 1;
   std::vector<std::string> lines;
+  std::size_t help_offset = 0;
   if (state.mode == InteractiveMode::Help) {
-    static constexpr std::array help = {
-      "My Tasks · Interactive watch keys",
-      "j/k Up/Down: move | gg/G: first/last | Ctrl-d/u: half page",
-      "a/o: add | e/cw: edit | x: toggle done/active",
-      "dd then y/n: delete | u: undo last session change",
-      "/: filter | Enter: keep | Esc: clear/cancel",
-      "Editor: UTF-8, Backspace, Ctrl-w/u, arrows, Home/End, Ctrl-a/e",
-      "q or ZZ: quit | ? or Esc: close help"
-    };
-    for (auto line : help) {
-      if (lines.size() >= static_cast<std::size_t>(height - 1)) break;
-      lines.push_back(clip_line(line, columns));
+    if (height > 1) {
+      auto title = clip_line("My Tasks · Help", columns);
+      lines.push_back(color ? "\033[1m" + title + "\033[0m" : title);
+    }
+    std::vector<std::string> body;
+    for (auto [key, description] : help_rows) {
+      std::string prefix = columns >= 38
+        ? "  " + std::string(key) + std::string(18 - std::string(key).size(), ' ')
+        : "  " + std::string(key) + ": ";
+      auto parts = !*description ? wrap_watch_row("", key, columns)
+        : columns >= 38 ? wrap_watch_row(prefix, description, columns)
+        : wrap_watch_row("", "  " + std::string(key) + ": " + description,
+                         columns);
+      for (auto& part : parts) {
+        body.push_back(color && !*description && *key
+                         ? "\033[1m" + part + "\033[0m" : part);
+      }
+    }
+    auto slots = static_cast<std::size_t>(std::max(0, height - 2));
+    help_offset = std::min(state.help_offset,
+      body.size() > slots ? body.size() - slots : std::size_t{0});
+    for (auto i = help_offset; i < body.size() && i < help_offset + slots; ++i) {
+      lines.push_back(body[i]);
     }
   } else if (height > 1) {
     WatchOptions options;
@@ -599,6 +649,7 @@ InteractiveFrame build_interactive_frame(
   lines.resize(static_cast<std::size_t>(height - 1));
   InteractiveFrame result;
   result.first_row = state.first_row;
+  result.help_offset = help_offset;
   if (state.mode != InteractiveMode::Help) {
     WatchViewport viewport{state.visible, state.first_row, state.selected_id};
     result.first_row = layout_watch_viewport(tasks, viewport, width,
@@ -631,8 +682,11 @@ InteractiveFrame build_interactive_frame(
     result.cursor_column = std::max(1, std::min(columns,
       display_width(prefix) + display_width(before_cursor) + 1));
   } else {
-    std::string hint = state.mode == InteractiveMode::Confirm
-                         ? " · y delete · n cancel" : " · ? help · q quit";
+    std::string hint = state.mode == InteractiveMode::Help
+      ? "j/k scroll · ?/Esc close · q quit"
+      : state.mode == InteractiveMode::Confirm
+        ? " · y delete · n cancel" : " · ? help · q quit";
+    if (state.mode == InteractiveMode::Help) prefix.clear();
     auto message = state.pending.empty() ? state.message
                                          : "Pending " + state.pending;
     if (!state.filter.empty() && state.mode == InteractiveMode::Normal) {
@@ -644,7 +698,8 @@ InteractiveFrame build_interactive_frame(
     }
     int room = std::max(0, columns - display_width(prefix) -
                            display_width(hint));
-    status = prefix + clip_line(terminal_safe_text(message), room) + hint;
+    status = state.mode == InteractiveMode::Help ? hint
+      : prefix + clip_line(terminal_safe_text(message), room) + hint;
   }
   auto footer = clip_line(status, columns);
   if (state.mode == InteractiveMode::Normal) {

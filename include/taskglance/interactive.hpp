@@ -56,6 +56,7 @@ struct InteractiveState {
   std::vector<Task> visible;
   std::size_t selected = 0;
   std::size_t first_row = 0;
+  std::size_t help_offset = 0;
   std::string selected_id;
   std::string target_id;  // captured when starting edit/confirmation
   std::string filter;
@@ -95,6 +96,7 @@ struct InteractiveFrame {
   std::string text;
   // Carry the pure layout's scroll position forward to the next frame.
   std::size_t first_row = 0;
+  std::size_t help_offset = 0;
   // One-based terminal column on the bottom row; absent in normal mode.
   std::optional<int> cursor_column;
 };

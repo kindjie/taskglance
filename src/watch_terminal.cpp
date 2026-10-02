@@ -309,6 +309,7 @@ int run_watch(const std::filesystem::path& file, double interval,
         last_change, Seconds(now - changed_at), options.color
       );
       interactive.first_row = rendered.first_row;
+      interactive.help_offset = rendered.help_offset;
       frame = std::move(rendered.text);
       cursor = rendered.cursor_column;
     } else {

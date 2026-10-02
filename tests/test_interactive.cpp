@@ -35,6 +35,22 @@ static void special(InteractiveState& state, KeyType type) {
   handle_interactive_key(state, {type, {}}, 6);
 }
 
+static void test_saved_order_with_active_before_done() {
+  auto done_first = task("dd1", "done first", 0);
+  auto done_second = task("dd2", "done second", -1);
+  done_first.status = done_second.status = TaskStatus::Done;
+  std::vector<Task> tasks{done_first, task("aa1", "priority first", 20),
+                         done_second, task("aa2", "priority second", 10)};
+  InteractiveState state;
+  reload_interactive(state, tasks, true);
+  CHECK(state.visible[0].id == "aa1" && state.visible[1].id == "aa2");
+  CHECK(state.visible[2].id == "dd1" && state.visible[3].id == "dd2");
+  state.selected_id = "aa2";
+  reload_interactive(state, tasks, false);
+  CHECK(state.visible.size() == 2 && state.visible[0].id == "aa1");
+  CHECK(state.selected_id == "aa2");
+}
+
 static void test_normal_keys() {
   InteractiveState state;
   reload_interactive(state, {task("aa", "First"), task("ab", "Second", 1)},
@@ -113,6 +129,37 @@ static void test_normal_keys() {
   CHECK(key(state, "Z").type == ActionType::Quit);
   CHECK(handle_interactive_key(state, {KeyType::CtrlC, {}}, 6).type ==
         ActionType::Quit);
+}
+
+static void test_help_layout_and_scroll() {
+  InteractiveState state;
+  key(state, "?");
+  auto render = [&] {
+    auto frame = build_interactive_frame({}, state, {}, 60, 10, {}, 0s, false);
+    state.help_offset = frame.help_offset;
+    return frame.text;
+  };
+  auto first = render();
+  CHECK(first.find("My Tasks · Help") != std::string::npos);
+  CHECK(first.find("Navigation") != std::string::npos);
+  CHECK(first.find("j/k scroll") != std::string::npos);
+  for (int i = 0; i < 30; ++i) key(state, "j");
+  CHECK(render() != first);
+  CHECK(state.selected == 0);
+  key(state, "G");
+  auto bottom = render();
+  key(state, "k");
+  CHECK(render() != bottom);
+  key(state, "g");
+  key(state, "g");
+  CHECK(render() == first);
+  for (int width : {1, 3, 20}) {
+    auto narrow = build_interactive_frame({}, state, {}, width, 6,
+                                           {}, 0s, false);
+    std::istringstream input(narrow.text);
+    std::string line;
+    while (std::getline(input, line)) CHECK(display_width(line) <= width - 1);
+  }
 }
 
 static void test_help_quit_sequence() {
@@ -456,7 +503,7 @@ static void test_interactive_frames() {
   CHECK(frame(0, 6).text.empty());
   special(state, KeyType::Escape);
   key(state, "?");
-  CHECK(unstyled(frame().text).find("gg/G") != std::string::npos);
+  CHECK(unstyled(frame().text).find("gg / G") != std::string::npos);
   special(state, KeyType::Escape);
   tasks[0].text = "Unsafe\033[2J\xff";
   reload_interactive(state, tasks, true);
@@ -666,7 +713,9 @@ int main() {
   test_mouse_wrapped_rows();
   test_wrapped_frames();
   test_normal_keys();
+  test_saved_order_with_active_before_done();
   test_help_quit_sequence();
+  test_help_layout_and_scroll();
   test_selection_and_filter();
   test_editor();
   test_decoder();

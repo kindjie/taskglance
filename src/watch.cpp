@@ -256,7 +256,7 @@ std::string build_watch_frame(
       if (a.status != b.status) {
         return a.status == TaskStatus::Active;
       }
-      return a.created_at < b.created_at;
+      return false;  // Preserve saved order within each status group.
     });
   }
   std::ostringstream header;

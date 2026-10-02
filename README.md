@@ -137,7 +137,7 @@ the pane is too short to show the whole task.
 | `dd`, then `y` / `n` | Confirm / cancel deletion |
 | `u` | Undo the last change made in this watch session |
 | `/` | Filter tasks by a case-insensitive substring |
-| `?` | Show key help; `?` or Esc closes it |
+| `?` | Grouped key help; j/k or arrows scroll, `?` or Esc closes |
 | Esc | Cancel a pending key sequence |
 | `q` / `ZZ` | Quit |
 
