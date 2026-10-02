@@ -232,3 +232,10 @@ MIT. See `LICENSE`.
   https://github.com/kindjie/taskglance/actions/workflows/build.yml/badge.svg
 [build-workflow]:
   https://github.com/kindjie/taskglance/actions/workflows/build.yml
+
+The watch header's `updated` time is the task-list file's modification time,
+not the time the view opened. The store has creation and completion times but
+no per-task edit timestamp. Active task text is cyan and completed text green
+and dim; selected tasks retain inverse highlighting. Existing colour settings
+apply, and plain output contains no colour escapes. Interactive scrolling
+reserves the entire wrapped selection before moving the viewport.

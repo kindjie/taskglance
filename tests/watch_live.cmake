@@ -25,6 +25,9 @@ execute_process(
   OUTPUT_QUIET
   COMMAND_ERROR_IS_FATAL ANY
 )
+file(TIMESTAMP "${WORK_DIR}/data/taskglance/tasks.tsv" persisted_clock
+     "%H:%M:%S")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1.1)
 execute_process(
   COMMAND ${env} "${CMAKE_COMMAND}" "-DTASKGLANCE=${TASKGLANCE}"
           "-DADD=Added while watching" -P "${CMAKE_CURRENT_LIST_FILE}"
@@ -44,4 +47,9 @@ if(NOT frames EQUAL 2 OR
    NOT output MATCHES "1 active.*Before watch.*2 active.*Added while")
   message(FATAL_ERROR "Expected an initial frame and one change frame, "
                       "got ${frames}:\n${output}")
+endif()
+
+string(FIND "${output}" "updated ${persisted_clock}" timestamp_position)
+if(timestamp_position EQUAL -1 OR persisted_clock STREQUAL "")
+  message(FATAL_ERROR "Watch did not retain the persisted list timestamp")
 endif()

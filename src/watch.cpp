@@ -261,7 +261,8 @@ std::string build_watch_frame(
   }
   std::ostringstream header;
   header << "taskglance | " << active_tasks(tasks).size()
-         << " active | changed " << format_local_clock(last_change);
+         << " active | updated " << (last_change.time_since_epoch().count() == 0
+           ? "unknown" : format_local_clock(last_change));
   std::string frame = truncate_display(header.str(), width);
   auto slots = static_cast<std::size_t>(height - 1);
   auto start = viewport ? std::min(viewport->first_row, visible.size()) : 0;
@@ -307,6 +308,14 @@ std::string build_watch_frame(
     }
     for (auto& line : lines) {
       line = color_task_ids(line, colors);
+      if (colors.color) {
+        // Colour the task text after the neutral ID; retain inverse selection.
+        auto marker = line.find("\033[39m");
+        auto tone = task.status == TaskStatus::Done ? "\033[32m" : "\033[36m";
+        if (marker != std::string::npos) line.insert(marker + 5, tone);
+        else line = std::string(tone) + line;
+        line += "\033[0m";
+      }
       if (options.tty) {
         bool highlight = since_change.count() >= 0 &&
                          since_change.count() < 10 &&

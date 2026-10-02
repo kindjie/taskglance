@@ -112,6 +112,16 @@ class WatchSignals {
 #endif
 };
 
+// The persisted list timestamp, not the time this view was opened.
+std::chrono::system_clock::time_point task_file_updated(
+    const std::filesystem::path& file) {
+  std::error_code error;
+  auto modified = std::filesystem::last_write_time(file, error);
+  if (error) return {};
+  return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+    std::chrono::file_clock::to_sys(modified));
+}
+
 class WatchScreen {
  public:
   explicit WatchScreen(bool tty) : tty_(tty) {
@@ -241,7 +251,7 @@ int run_watch(const std::filesystem::path& file, double interval,
   WatchScreen screen(options.tty);
   auto content = taskglance::read_task_file(file);
   auto tasks = taskglance::parse_tasks(content);
-  auto last_change = std::chrono::system_clock::now();
+  auto last_change = task_file_updated(file);
   auto changed_at = Clock::now();
   auto polled_at = changed_at;
   std::vector<std::string> changed_ids;
@@ -270,7 +280,7 @@ int run_watch(const std::filesystem::path& file, double interval,
                       .changed_ids;
       tasks = std::move(updated);
       content = std::move(next);
-      last_change = std::chrono::system_clock::now();
+      last_change = task_file_updated(file);
       changed_at = polled_at;
       highlighting = options.tty && !changed_ids.empty();
       if (options.interactive) {
