@@ -239,3 +239,7 @@ no per-task edit timestamp. Active task text is cyan and completed text green
 and dim; selected tasks retain inverse highlighting. Existing colour settings
 apply, and plain output contains no colour escapes. Interactive scrolling
 reserves the entire wrapped selection before moving the viewport.
+
+Interactive watch (`watch -i`) supports wheel scrolling and clicking a task
+row to select it, including a wrapped row. Mouse input is ignored while
+editing or confirming changes. Mouse reporting is disabled when watch exits.

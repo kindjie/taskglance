@@ -56,6 +56,17 @@ static void test_normal_keys() {
   CHECK(state.selected == 1);
   special(state, KeyType::Up);
   CHECK(state.selected == 0);
+  special(state, KeyType::WheelDown);
+  CHECK(state.selected == 1);
+  special(state, KeyType::WheelUp);
+  CHECK(state.selected == 0);
+  CHECK(select_mouse_row(state, state.visible, 2, 80, 10));
+  CHECK(state.selected == 1);
+  CHECK(!select_mouse_row(state, state.visible, 0, 80, 10));
+  state.mode = InteractiveMode::Add;
+  CHECK(!select_mouse_row(state, state.visible, 1, 80, 10));
+  state.mode = InteractiveMode::Normal;
+  CHECK(select_mouse_row(state, state.visible, 1, 80, 10));
   CHECK(key(state, "x").type == ActionType::Toggle);
   CHECK(key(state, "u").type == ActionType::Undo);
   CHECK(key(state, "d").type == ActionType::None);
@@ -222,6 +233,16 @@ static void test_editor() {
 }
 
 static void test_decoder() {
+  KeyDecoder mouse;
+  auto wheel = mouse.feed("\033[<64;10;3M\033[<65;10;3M");
+  CHECK(wheel.size() == 2);
+  CHECK(wheel[0].type == KeyType::WheelUp);
+  CHECK(wheel[1].type == KeyType::WheelDown);
+  CHECK(mouse.feed("\033[<0;9;").empty());
+  auto clicked = mouse.feed("4M");
+  CHECK(clicked.size() == 1 && clicked[0].type == KeyType::MouseClick);
+  CHECK(clicked[0].column == 8 && clicked[0].row == 3);
+  CHECK(mouse.feed("\033[<0;9;4m\033[<66;10;3M").empty());
   KeyDecoder decoder;
   CHECK(decoder.feed("\033").empty() && decoder.pending_escape());
   CHECK(decoder.feed("[").empty());
@@ -559,6 +580,25 @@ static void test_wrapped_frames() {
   }
 }
 
+static void test_mouse_wrapped_rows() {
+  InteractiveState state;
+  auto tasks = std::vector<Task>{task("aa", "long title spanning many rows"),
+                                 task("bb", "Second", 1)};
+  reload_interactive(state, tasks, true);
+  WatchViewport viewport{state.visible, state.first_row, state.selected_id};
+  auto layout = layout_watch_viewport(tasks, viewport, 16, 9);
+  CHECK(layout.selected_lines > 1);
+  CHECK(select_mouse_row(state, tasks, static_cast<int>(layout.selected_lines),
+                          16, 10));
+  CHECK(state.selected_id == "aa");
+  CHECK(select_mouse_row(state, tasks,
+                          static_cast<int>(layout.selected_lines) + 1, 16, 10));
+  CHECK(state.selected_id == "bb");
+  state.mode = InteractiveMode::Help;
+  special(state, KeyType::WheelUp);
+  CHECK(state.selected_id == "bb");
+}
+
 static void test_wrapping_and_layout() {
   CHECK((wrap_watch_row("[aa] ", "one two three four", 14) ==
          std::vector<std::string>{"[aa] one two", "     three", "     four"}));
@@ -619,6 +659,7 @@ static void test_wrapping_and_layout() {
 
 int main() {
   test_wrapping_and_layout();
+  test_mouse_wrapped_rows();
   test_wrapped_frames();
   test_normal_keys();
   test_help_quit_sequence();

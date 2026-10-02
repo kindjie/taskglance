@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <limits>
 #include <locale>
 #include <stdexcept>
@@ -88,6 +89,27 @@ Key control_key(unsigned char byte) {
 }
 
 Key escape_key(const std::string& sequence) {
+  if (sequence.starts_with("\033[<") && sequence.back() == 'M') {
+    int values[3] = {};
+    auto begin = sequence.data() + 3;
+    auto end = sequence.data() + sequence.size() - 1;
+    for (int i = 0; i < 3; ++i) {
+      auto parsed = std::from_chars(begin, end, values[i]);
+      if (parsed.ec != std::errc{} || parsed.ptr == begin) return {};
+      if (i < 2) {
+        if (parsed.ptr == end || *parsed.ptr != ';') return {};
+        begin = parsed.ptr + 1;
+      } else if (parsed.ptr != end) return {};
+    }
+    if (values[1] < 1 || values[2] < 1) return {};
+    auto button = values[0] & ~28;  // Ignore modifier bits, keep button/motion.
+    if (button == 64) return {KeyType::WheelUp, {}};
+    if (button == 65) return {KeyType::WheelDown, {}};
+    if (button == 0) {
+      return {KeyType::MouseClick, {}, values[1] - 1, values[2] - 1};
+    }
+    return {};
+  }
   if (sequence == "\033[A" || sequence == "\033OA") {
     return {KeyType::Up, {}};
   }
@@ -302,6 +324,27 @@ void reload_interactive(InteractiveState& state,
                      : static_cast<std::size_t>(found - state.visible.begin()));
 }
 
+bool select_mouse_row(InteractiveState& state, const std::vector<Task>& tasks,
+                      int row, int width, int height) {
+  if (state.mode != InteractiveMode::Normal || row < 1 || row >= height - 1) {
+    return false;
+  }
+  WatchViewport viewport{state.visible, state.first_row, state.selected_id};
+  auto layout = layout_watch_viewport(tasks, viewport, width, height - 1);
+  int y = 1;
+  for (std::size_t i = 0; i < layout.count; ++i) {
+    auto index = layout.first_row + i;
+    auto lines = state.visible[index].id == state.selected_id
+                   ? layout.selected_lines : 1;
+    if (row >= y && row < y + static_cast<int>(lines)) {
+      select_row(state, index);
+      return true;
+    }
+    y += static_cast<int>(lines);
+  }
+  return false;
+}
+
 void scroll_interactive(InteractiveState& state, std::size_t rows) {
   if (rows == 0 || state.visible.empty()) {
     state.first_row = 0;
@@ -383,9 +426,11 @@ InteractiveAction handle_interactive_key(InteractiveState& state,
     return {};
   }
   auto step = std::max<std::size_t>(1, page_rows / 2);
-  if (text == "j" || key.type == KeyType::Down) {
+  if (text == "j" || key.type == KeyType::Down ||
+      key.type == KeyType::WheelDown) {
     select_row(state, state.selected + 1);
-  } else if (text == "k" || key.type == KeyType::Up) {
+  } else if (text == "k" || key.type == KeyType::Up ||
+             key.type == KeyType::WheelUp) {
     select_row(state, state.selected > 0 ? state.selected - 1 : 0);
   } else if (text == "G") {
     select_row(state, state.visible.size());

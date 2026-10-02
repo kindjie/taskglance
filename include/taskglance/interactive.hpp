@@ -11,12 +11,15 @@ namespace taskglance {
 
 enum class KeyType {
   Text, Escape, Enter, Backspace, Left, Right, Up, Down, Home, End,
-  CtrlA, CtrlC, CtrlD, CtrlE, CtrlU, CtrlW, Unknown
+  CtrlA, CtrlC, CtrlD, CtrlE, CtrlU, CtrlW, WheelUp, WheelDown,
+  MouseClick, Unknown
 };
 
 struct Key {
   KeyType type = KeyType::Unknown;
   std::string text;
+  int column = -1;
+  int row = -1;
 };
 
 // Streaming decoder: feed arbitrary byte chunks. The caller expires an
@@ -102,5 +105,8 @@ InteractiveFrame build_interactive_frame(
   std::chrono::system_clock::time_point last_change,
   std::chrono::duration<double> since_change, bool color
 );
+
+bool select_mouse_row(InteractiveState& state, const std::vector<Task>& tasks,
+                      int row, int width, int height);
 
 }  // namespace taskglance

@@ -124,7 +124,7 @@ std::chrono::system_clock::time_point task_file_updated(
 
 class WatchScreen {
  public:
-  explicit WatchScreen(bool tty) : tty_(tty) {
+  explicit WatchScreen(bool tty, bool mouse) : tty_(tty), mouse_(mouse) {
     if (!tty_) {
       return;
     }
@@ -137,11 +137,13 @@ class WatchScreen {
     }
 #endif
     std::fputs("\033[?1049h\033[?25l", stdout);
+    if (mouse_) std::fputs("\033[?1000h\033[?1006h", stdout);
     std::fflush(stdout);
   }
 
   ~WatchScreen() {
     if (tty_) {
+      if (mouse_) std::fputs("\033[?1006l\033[?1000l", stdout);
       std::fputs("\033[0m\033[?25h\033[?1049l", stdout);
       std::fflush(stdout);
 #ifdef _WIN32
@@ -152,6 +154,7 @@ class WatchScreen {
 
  private:
   bool tty_;
+  bool mouse_;
 #ifdef _WIN32
   HANDLE handle_ = INVALID_HANDLE_VALUE;
   DWORD mode_ = 0;
@@ -248,7 +251,7 @@ int run_watch(const std::filesystem::path& file, double interval,
 #ifndef _WIN32
   WatchInput input(options.interactive);
 #endif
-  WatchScreen screen(options.tty);
+  WatchScreen screen(options.tty, options.interactive);
   auto content = taskglance::read_task_file(file);
   auto tasks = taskglance::parse_tasks(content);
   auto last_change = task_file_updated(file);
@@ -344,6 +347,11 @@ int run_watch(const std::filesystem::path& file, double interval,
     for (std::size_t index = 0; index < keys.size(); ++index) {
       const auto& key = keys[index];
       if (stopped) break;
+      if (key.type == taskglance::KeyType::MouseClick) {
+        redraw |= taskglance::select_mouse_row(interactive, tasks, key.row,
+                                               size.width, size.height);
+        continue;
+      }
       auto action = taskglance::handle_interactive_key(interactive, key,
                                                        page_rows());
       redraw = true;
