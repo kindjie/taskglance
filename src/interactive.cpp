@@ -14,12 +14,17 @@
 namespace taskglance {
 namespace {
 
-constexpr std::array<std::pair<const char*, const char*>, 21> help_rows = {{
+constexpr std::array<std::pair<const char*, const char*>, 26> help_rows = {{
   {"Navigation", ""},
   {"j/k, Up/Down", "Select task"},
   {"gg / G", "First / last task"},
   {"Ctrl-d / Ctrl-u", "Move half a page"},
   {"Wheel / click", "Scroll / select task"},
+  {"", ""},
+  {"Sorting", ""},
+  {"s", "Toggle saved order / name (A-Z)"},
+  {"Updated", "List file time; no per-task edit timestamps"},
+  {"Order", "Active before done; sorting never changes saved tasks"},
   {"", ""},
   {"Change tasks", ""},
   {"a / o", "Add task"},
@@ -336,8 +341,13 @@ void reload_interactive(InteractiveState& state,
     }
   }
   std::stable_sort(state.visible.begin(), state.visible.end(),
-                   [](const Task& a, const Task& b) {
+                   [&](const Task& a, const Task& b) {
     if (a.status != b.status) return a.status == TaskStatus::Active;
+    if (state.sort == ViewSort::Name) {
+      auto first = lowercase_filter(a.text);
+      auto second = lowercase_filter(b.text);
+      return first == second ? a.id < b.id : first < second;
+    }
     return false;  // Preserve saved order within each status group.
   });
   auto found = std::find_if(state.visible.begin(), state.visible.end(),
@@ -476,6 +486,9 @@ InteractiveAction handle_interactive_key(InteractiveState& state,
     select_row(state, state.selected + step);
   } else if (key.type == KeyType::CtrlU) {
     select_row(state, state.selected > step ? state.selected - step : 0);
+  } else if (text == "s") {
+    state.sort = state.sort == ViewSort::Saved ? ViewSort::Name
+                                              : ViewSort::Saved;
   } else if (text == "a" || text == "o") {
     state.mode = InteractiveMode::Add;
     state.target_id.clear();
@@ -685,7 +698,7 @@ InteractiveFrame build_interactive_frame(
     std::string hint = state.mode == InteractiveMode::Help
       ? "j/k scroll · ?/Esc close · q quit"
       : state.mode == InteractiveMode::Confirm
-        ? " · y delete · n cancel" : " · ? help · q quit";
+        ? " · y delete · n cancel" : " · s sort · ? help · q quit";
     if (state.mode == InteractiveMode::Help) prefix.clear();
     auto message = state.pending.empty() ? state.message
                                          : "Pending " + state.pending;
@@ -693,7 +706,8 @@ InteractiveFrame build_interactive_frame(
       message = "/" + state.filter + " · " + message;
     }
     if (state.mode == InteractiveMode::Normal) {
-      prefix = std::to_string(state.visible.size()) + " tasks";
+      prefix = std::to_string(state.visible.size()) + " tasks · sort: " +
+        (state.sort == ViewSort::Saved ? "saved" : "name");
       if (!message.empty()) prefix += " · ";
     }
     int room = std::max(0, columns - display_width(prefix) -

@@ -51,6 +51,41 @@ static void test_saved_order_with_active_before_done() {
   CHECK(state.selected_id == "aa2");
 }
 
+static void test_sort_toggle_preserves_identity_filter_and_mouse() {
+  auto done = task("done", "aardvark");
+  done.status = TaskStatus::Done;
+  std::vector<Task> tasks{task("zz", "Zulu"), task("ab", "alpha"),
+                         task("aa", "Alpha"), done};
+  auto original = tasks;
+  InteractiveState state;
+  reload_interactive(state, tasks, true);
+  state.selected_id = "zz";
+  CHECK(key(state, "s").type == ActionType::None);
+  reload_interactive(state, tasks, true);
+  CHECK(state.visible[0].id == "aa" && state.visible[1].id == "ab");
+  CHECK(state.visible[2].id == "zz" && state.visible[3].id == "done");
+  CHECK(state.selected_id == "zz" && state.selected == 2);
+  std::reverse(tasks.begin(), tasks.end());
+  reload_interactive(state, tasks, true);
+  CHECK(state.visible[0].id == "aa" && state.selected_id == "zz");
+  CHECK(select_mouse_row(state, tasks, 1, 80, 12));
+  CHECK(state.selected_id == "aa");
+  CHECK(key(state, "e").type == ActionType::None);
+  CHECK(state.target_id == "aa" && state.editor.text == "Alpha");
+  special(state, KeyType::Escape);
+  key(state, "/");
+  key(state, "s");
+  CHECK(state.editor.text == "s");
+  special(state, KeyType::Escape);
+  key(state, "s");
+  reload_interactive(state, original, true);
+  CHECK(state.visible[0].id == "zz" && state.visible[1].id == "ab");
+  CHECK(state.selected_id == "aa");
+  auto frame = build_interactive_frame(original, state, {}, 120, 20,
+                                       {}, 0s, false);
+  CHECK(frame.text.find("sort: saved") != std::string::npos);
+}
+
 static void test_normal_keys() {
   InteractiveState state;
   reload_interactive(state, {task("aa", "First"), task("ab", "Second", 1)},
@@ -713,6 +748,7 @@ int main() {
   test_mouse_wrapped_rows();
   test_wrapped_frames();
   test_normal_keys();
+  test_sort_toggle_preserves_identity_filter_and_mouse();
   test_saved_order_with_active_before_done();
   test_help_quit_sequence();
   test_help_layout_and_scroll();

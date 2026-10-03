@@ -42,6 +42,8 @@ struct LineEditor {
 enum class EditorResult { Continue, Commit, Cancel };
 EditorResult edit_line(LineEditor& editor, const Key& key);
 
+enum class ViewSort { Saved, Name };
+
 enum class InteractiveMode { Normal, Add, Edit, Filter, Confirm, Help };
 enum class ActionType { None, Add, Edit, Toggle, Delete, Undo, Quit };
 
@@ -53,6 +55,7 @@ struct InteractiveAction {
 
 struct InteractiveState {
   InteractiveMode mode = InteractiveMode::Normal;
+  ViewSort sort = ViewSort::Saved;
   std::vector<Task> visible;
   std::size_t selected = 0;
   std::size_t first_row = 0;
